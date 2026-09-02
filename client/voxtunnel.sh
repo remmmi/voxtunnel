@@ -85,10 +85,14 @@ ssh_vps() { ssh -o BatchMode=yes -o ConnectTimeout=10 "$VPS_HOST" "$@"; }
 
 # Lecture distante vers la face playback du loopback. Compression desactivee :
 # le PCM brut ne se comprime pas, gzip ne ferait qu'ajouter du delai.
+# Avant de jouer, on tue tout aplay orphelin encore accroche a ce device
+# (connexion SSH morte salement) : il garde le device ouvert en exclusif et
+# le nouveau stream echouerait avec "Device or resource busy".
 remote_play() {
   ssh -o BatchMode=yes -o ConnectTimeout=10 -o Compression=no -o IPQoS=lowdelay \
       "$VPS_HOST" \
-      "aplay -D $REMOTE_SINK -f S16_LE -c 1 -r $RATE -t raw -q \
+      "pkill -f '^aplay -D $REMOTE_SINK' 2>/dev/null; sleep 0.2; \
+       exec aplay -D $REMOTE_SINK -f S16_LE -c 1 -r $RATE -t raw -q \
              --buffer-time=$BUFFER_US --period-time=$PERIOD_US"
 }
 

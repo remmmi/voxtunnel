@@ -32,4 +32,4 @@ echo voxtunnel - "%MIC%" to %VPS% (Ctrl-C to stop)
 ffmpeg -hide_banner -loglevel error -f dshow -audio_buffer_size 20 ^
        -i audio="%MIC%" -f s16le -ar 48000 -ac 1 - | ^
 ssh -o BatchMode=yes -o ConnectTimeout=10 -o Compression=no %VPS% ^
-    "aplay -D plughw:Loopback,0,0 -f S16_LE -c 1 -r 48000 -t raw -q --buffer-time=80000 --period-time=20000"
+    "pkill -f '^aplay -D plughw:Loopback,0,0' 2>/dev/null; sleep 0.2; exec aplay -D plughw:Loopback,0,0 -f S16_LE -c 1 -r 48000 -t raw -q --buffer-time=80000 --period-time=20000"

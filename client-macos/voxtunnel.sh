@@ -43,5 +43,6 @@ ffmpeg -hide_banner -loglevel error -f avfoundation -i "$MIC" \
        -f s16le -ar "$RATE" -ac 1 - \
 | ssh -o BatchMode=yes -o ConnectTimeout=10 -o Compression=no -o IPQoS=lowdelay \
       "$VPS_HOST" \
-      "aplay -D plughw:Loopback,0,0 -f S16_LE -c 1 -r $RATE -t raw -q \
+      "pkill -f '^aplay -D plughw:Loopback,0,0' 2>/dev/null; sleep 0.2; \
+       exec aplay -D plughw:Loopback,0,0 -f S16_LE -c 1 -r $RATE -t raw -q \
              --buffer-time=$BUFFER_US --period-time=$PERIOD_US"
