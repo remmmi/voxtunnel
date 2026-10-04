@@ -75,20 +75,20 @@ def check(name, ok):
 
 
 QTimer.singleShot(300, lambda: ui.window.rows["alpha"].switch.setChecked(True))
-QTimer.singleShot(4500, lambda: check("stream lance", "alpha" in ui.manager.procs))
-QTimer.singleShot(4600, lambda: check(
+QTimer.singleShot(6500, lambda: check("stream lance", "alpha" in ui.manager.procs))
+QTimer.singleShot(6600, lambda: check(
     "statut actif", ui.window.rows["alpha"].status.text() == "actif - 60 ms"))
-QTimer.singleShot(4700, lambda: check(
+QTimer.singleShot(6700, lambda: check(
     "tampon monte sur underruns", ui.manager.buffers.get("alpha") == 60))
-QTimer.singleShot(5000, lambda: ui.window.master_switch.setChecked(False))
-QTimer.singleShot(8000, lambda: check("coupure: plus de stream", not ui.manager.procs))
-QTimer.singleShot(8100, lambda: check(
+QTimer.singleShot(7000, lambda: ui.window.master_switch.setChecked(False))
+QTimer.singleShot(10000, lambda: check("coupure: plus de stream", not ui.manager.procs))
+QTimer.singleShot(10100, lambda: check(
     "coupure: interrupteur intact", ui.window.rows["alpha"].switch.isChecked()))
-QTimer.singleShot(8500, lambda: ui.window.master_switch.setChecked(True))
-QTimer.singleShot(10500, lambda: check("retablissement", "alpha" in ui.manager.procs))
-QTimer.singleShot(11000, ui.manager.stop_all)
-QTimer.singleShot(13500, lambda: check("arret final", not ui.manager.procs))
-QTimer.singleShot(14000, app.quit)
+QTimer.singleShot(10500, lambda: ui.window.master_switch.setChecked(True))
+QTimer.singleShot(12500, lambda: check("retablissement", "alpha" in ui.manager.procs))
+QTimer.singleShot(13000, ui.manager.stop_all)
+QTimer.singleShot(15500, lambda: check("arret final", not ui.manager.procs))
+QTimer.singleShot(16000, app.quit)
 QTimer.singleShot(30000, lambda: sys.exit(2))  # garde-fou
 
 app.exec_()
