@@ -25,6 +25,7 @@ jobs:
       - run: pip install PyQt5
       - run: python tests/test_buffer.py
       - run: python tests/test_update.py
+      - run: python tests/test_plugin.py
       - run: python tests/smoke.py
         env:
           QT_QPA_PLATFORM: offscreen
