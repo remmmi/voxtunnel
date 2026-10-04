@@ -23,11 +23,13 @@
 # et affiche l'erreur.
 
 import os
+import queue
 import re
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 __version__ = "1.2.1"
@@ -47,6 +49,9 @@ from PyQt5.QtWidgets import (
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
+import vox_buffer  # noqa: E402  (module voisin : sonde et tampon auto)
+
 VOICEPIPE = os.path.join(SCRIPT_DIR, "voxtunnel.sh")
 ICON_DIR = os.path.join(SCRIPT_DIR, "icons")
 LOG_DIR = os.path.join(os.path.expanduser("~"), ".cache", "voxtunnel")
@@ -57,8 +62,15 @@ OFF, STARTING, ON, ERROR = "off", "starting", "on", "error"
 
 GREEN, GRAY, ORANGE, RED = "#4caf50", "#9e9e9e", "#e6a23c", "#f44336"
 
-# tampon ALSA reglable depuis la fenetre (voir l'en-tete de voxtunnel.sh)
-BUFFER_MIN_MS, BUFFER_DEFAULT_MS, BUFFER_MAX_MS = 40, 80, 300
+# tampon ALSA reglable depuis la fenetre (voir l'en-tete de voxtunnel.sh),
+# ou choisi par host en mode auto (voir vox_buffer.py)
+BUFFER_MIN_MS = vox_buffer.BUFFER_MIN_MS
+BUFFER_DEFAULT_MS = vox_buffer.BUFFER_DEFAULT_MS
+BUFFER_MAX_MS = vox_buffer.BUFFER_MAX_MS
+
+# en mode auto, une mesure du lien plus vieille que ca est refaite avant
+# de relancer un stream ; en deca le stream repart sans attendre la sonde
+PROBE_TTL_S = 600
 
 # Etat de l'ecoute cote VPS. R = pret (carte Loopback en place),
 # RL = pret et une capture est ouverte en ce moment (un substream pcm1c
@@ -125,7 +137,7 @@ def ssh_play_cmd(host, buffer_ms):
             "-o", "Compression=no", "-o", "IPQoS=lowdelay", host,
             "aplay -D plughw:Loopback,0,0 -f S16_LE -c 1 -r 48000 -t raw -q "
             "--buffer-time=%d --period-time=%d"
-            % (buffer_ms * 1000, buffer_ms * 250)]
+            % (buffer_ms * 1000, vox_buffer.period_us(buffer_ms))]
 
 
 def discover_hosts():
@@ -172,13 +184,18 @@ class StreamManager(QObject):
     """Un process voxtunnel.sh par host actif, surveille par un timer."""
 
     state_changed = pyqtSignal(str, str, str)  # host, etat, message
+    buffer_wanted = pyqtSignal(str, int)       # host, tampon a appliquer (ms)
 
     def __init__(self):
         super().__init__()
         self.procs = {}      # host -> liste de Popen (pipeline complet)
         self.started = {}    # host -> horodatage du lancement
         self.stopping = set()
-        self.buffer_ms = BUFFER_DEFAULT_MS
+        self.buffer_ms = BUFFER_DEFAULT_MS   # tampon manuel (slider)
+        self.auto = True     # tampon choisi et surveille par host
+        self.buffers = {}    # host -> tampon du stream en cours (ms)
+        self.watchers = {}   # host -> vox_buffer.Watcher
+        self.log_pos = {}    # host -> octets du log deja lus
         os.makedirs(LOG_DIR, exist_ok=True)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll)
@@ -190,17 +207,22 @@ class StreamManager(QObject):
     def is_running(self, host):
         return host in self.procs
 
-    def start(self, host):
+    def is_unstable(self, host):
+        watcher = self.watchers.get(host)
+        return bool(watcher and watcher.unstable)
+
+    def start(self, host, buffer_ms=None):
         if host in self.procs:
             return
+        ms = buffer_ms or self.buffer_ms
         log = open(self.log_path(host), "wb", buffering=0)
         try:
             if IS_LINUX:
                 # chemin de reference : le script fait tout, dans son
-                # propre groupe de process (ratio tampon/periode 4:1)
+                # propre groupe de process
                 env = dict(os.environ, VPS_HOST=host,
-                           BUFFER_US=str(self.buffer_ms * 1000),
-                           PERIOD_US=str(self.buffer_ms * 250))
+                           BUFFER_US=str(ms * 1000),
+                           PERIOD_US=str(vox_buffer.period_us(ms)))
                 procs = [subprocess.Popen(
                     [VOICEPIPE], env=env, stdout=log,
                     stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -212,7 +234,7 @@ class StreamManager(QObject):
                     capture_cmd(), stdout=subprocess.PIPE, stderr=log,
                     stdin=subprocess.DEVNULL, **flags)
                 play = subprocess.Popen(
-                    ssh_play_cmd(host, self.buffer_ms), stdin=cap.stdout,
+                    ssh_play_cmd(host, ms), stdin=cap.stdout,
                     stdout=log, stderr=subprocess.STDOUT, **flags)
                 cap.stdout.close()
                 procs = [cap, play]
@@ -223,6 +245,9 @@ class StreamManager(QObject):
         log.close()
         self.procs[host] = procs
         self.started[host] = time.monotonic()
+        self.buffers[host] = ms
+        self.watchers[host] = vox_buffer.Watcher(ms)
+        self.log_pos[host] = 0
         self.state_changed.emit(host, STARTING, "")
 
     def _terminate(self, proc):
@@ -254,6 +279,23 @@ class StreamManager(QObject):
         except OSError:
             return "pas de log"
 
+    def _watch(self, host):
+        """Donne au Watcher du host les lignes du log arrivees depuis la
+        derniere lecture ; signale le tampon a appliquer s'il faut monter."""
+        try:
+            with open(self.log_path(host), "rb") as f:
+                f.seek(self.log_pos[host])
+                data = f.read()
+        except OSError:
+            return
+        self.log_pos[host] += len(data)
+        if not self.auto:
+            return
+        ms = self.watchers[host].feed(data.decode(errors="replace"),
+                                      time.monotonic())
+        if ms:
+            self.buffer_wanted.emit(host, ms)
+
     def _poll(self):
         for host, procs in list(self.procs.items()):
             # le dernier maillon (ssh sur mac/win, le script sur linux)
@@ -264,12 +306,19 @@ class StreamManager(QObject):
                         self._terminate(proc)
                 del self.procs[host]
                 self.started.pop(host, None)
+                self.buffers.pop(host, None)
+                self.watchers.pop(host, None)
+                self.log_pos.pop(host, None)
                 if host in self.stopping:
                     self.stopping.discard(host)
                     self.state_changed.emit(host, OFF, "")
                 else:
                     self.state_changed.emit(host, ERROR, self._last_log_line(host))
-            elif IS_LINUX:
+                continue
+            self._watch(host)
+            if host in self.stopping:
+                continue
+            if IS_LINUX:
                 # passe de "connexion" a "actif" quand le preflight est franchi
                 try:
                     with open(self.log_path(host), errors="replace") as f:
@@ -444,9 +493,10 @@ class HostRow(QWidget):
 
 
 class MainWindow(QWidget):
-    def __init__(self, hosts, toggle_cb, master_cb, buffer_cb):
+    def __init__(self, hosts, toggle_cb, master_cb, buffer_cb, auto_cb):
         super().__init__()
         self.buffer_cb = buffer_cb
+        self.auto_cb = auto_cb
         self.setWindowTitle("Voxtunnel")
         layout = QVBoxLayout(self)
 
@@ -485,8 +535,9 @@ class MainWindow(QWidget):
                 row.name.setFixedWidth(name_w)
         layout.addStretch(1)
 
-        # slider du tampon ALSA, en bas : plus haut = moins de coupures,
-        # plus de latence ; applique aux streams en cours et suivants
+        # tampon ALSA, en bas. Auto : mesure par host au demarrage, puis
+        # montee sur underruns. Sinon le slider : plus haut = moins de
+        # coupures, plus de latence ; applique aux streams en cours et suivants
         buf = QHBoxLayout()
         buf.setContentsMargins(8, 6, 8, 2)
         self.buffer_label = QLabel()
@@ -494,14 +545,22 @@ class MainWindow(QWidget):
         self.slider.setRange(BUFFER_MIN_MS, BUFFER_MAX_MS)
         self.slider.setValue(BUFFER_DEFAULT_MS)
         self.slider.setSingleStep(10)
-        self.slider.setPageStep(20)
+        self.slider.setPageStep(50)
+        self.slider.setEnabled(False)
         self.slider.setToolTip(
             "Buffer audio : plus haut = moins de micro-coupures,\n"
             "plus de latence. Les streams en cours sont relancés.")
         self.slider.valueChanged.connect(self._on_slider_changed)
         self.slider.sliderReleased.connect(
             lambda: self.buffer_cb(self.slider.value()))
+        self.auto_box = QCheckBox("Auto")
+        self.auto_box.setChecked(True)
+        self.auto_box.setToolTip(
+            "Auto : le buffer de chaque host est mesuré au démarrage,\n"
+            "puis monte tout seul si le lien décroche.")
+        self.auto_box.toggled.connect(self._on_auto_toggled)
         buf.addWidget(QLabel("Buffer"))
+        buf.addWidget(self.auto_box)
         buf.addWidget(self.slider, 1)
         buf.addWidget(self.buffer_label)
         layout.addLayout(buf)
@@ -515,8 +574,14 @@ class MainWindow(QWidget):
         link.setStyleSheet("font-size: 10px; margin-right: 8px;")
         layout.addWidget(link)
 
+    def _on_auto_toggled(self, on):
+        self.slider.setEnabled(not on)
+        self._on_slider_changed(self.slider.value())
+        self.auto_cb(on)
+
     def _on_slider_changed(self, value):
-        self.buffer_label.setText("%d ms" % value)
+        self.buffer_label.setText(
+            "auto" if self.auto_box.isChecked() else "%d ms" % value)
         # au clavier il n'y a pas de sliderReleased : applique directement
         if not self.slider.isSliderDown():
             self.buffer_cb(value)
@@ -541,9 +606,16 @@ class VoiceTrayApp:
         self.desired = set()       # hosts dont l'interrupteur est ON
         self.transmitting = True   # etat du voyant / interrupteur maitre
         self.restart_pending = set()  # a relancer des que leur arret est acte
+        self.host_buffer = {}      # host -> (tampon auto en ms, instant mesure)
+        self.probing = set()       # hosts dont la sonde est en vol
+        self.probe_results = queue.Queue()  # (host, allers-retours en ms)
+        self.probe_timer = QTimer()
+        self.probe_timer.timeout.connect(self._collect_probes)
+        self.probe_timer.start(200)
 
         self.window = MainWindow(self.hosts, self.toggle_host,
-                                 self.set_transmitting, self.set_buffer)
+                                 self.set_transmitting, self.set_buffer,
+                                 self.set_auto)
 
         self.checker = ListenerChecker(self.hosts)
         self.checker.result.connect(self._on_listener_result)
@@ -574,6 +646,7 @@ class VoiceTrayApp:
         self.tray.show()
 
         self.manager.state_changed.connect(self._on_state_changed)
+        self.manager.buffer_wanted.connect(self._on_buffer_wanted)
         self._update_tray()
 
     @staticmethod
@@ -592,7 +665,7 @@ class VoiceTrayApp:
         if on:
             self.desired.add(host)
             if self.transmitting:
-                self.manager.start(host)
+                self._start_stream(host)
             else:
                 self._set_host_ui(host, True, "suspendu", ORANGE)
         else:
@@ -603,14 +676,69 @@ class VoiceTrayApp:
                 self._set_host_ui(host, False, "inactif", GRAY)
         self._update_tray()
 
+    def _start_stream(self, host):
+        """Lance le stream ; en mode auto, sonde d'abord le lien si la
+        derniere mesure du host est absente ou trop vieille."""
+        if not self.manager.auto:
+            self.manager.start(host)
+            return
+        known = self.host_buffer.get(host)
+        if known and time.monotonic() - known[1] < PROBE_TTL_S:
+            self.manager.start(host, known[0])
+            return
+        self._set_host_ui(host, True, "mesure du lien...", ORANGE)
+        if host in self.probing:
+            return
+        self.probing.add(host)
+        threading.Thread(
+            target=lambda: self.probe_results.put(
+                (host, vox_buffer.probe(host))),
+            daemon=True).start()
+
+    def _collect_probes(self):
+        while True:
+            try:
+                host, rtts = self.probe_results.get_nowait()
+            except queue.Empty:
+                return
+            self.probing.discard(host)
+            previous = self.host_buffer.get(host, (None,))[0]
+            ms = vox_buffer.recommend(rtts, previous)
+            if ms:
+                self.host_buffer[host] = (ms, time.monotonic())
+            # sonde en echec : le stream part quand meme, son preflight
+            # affichera la vraie erreur
+            if self.transmitting and host in self.desired:
+                self.manager.start(host, ms if self.manager.auto else None)
+                self._update_tray()
+
+    def _restart(self, host):
+        self.restart_pending.add(host)
+        self.manager.stop(host)
+
+    def _on_buffer_wanted(self, host, ms):
+        # trop d'underruns : le stream repart avec un tampon plus grand
+        self.host_buffer[host] = (ms, time.monotonic())
+        self._restart(host)
+
+    def set_auto(self, on):
+        self.manager.auto = on
+        if on:
+            # les streams en cours gardent leur tampon, la surveillance reprend
+            return
+        for host, ms in list(self.manager.buffers.items()):
+            if ms != self.manager.buffer_ms:
+                self._restart(host)
+
     def set_buffer(self, ms):
         if ms == self.manager.buffer_ms:
             return
         self.manager.buffer_ms = ms
+        if self.manager.auto:
+            return
         # relance les streams en cours pour appliquer le nouveau tampon
         for host in list(self.manager.procs):
-            self.restart_pending.add(host)
-            self.manager.stop(host)
+            self._restart(host)
 
     def _on_listener_result(self, host, ready, capture_open):
         row = self.window.rows.get(host)
@@ -625,7 +753,7 @@ class VoiceTrayApp:
         self.master_action.blockSignals(False)
         if on:
             for host in sorted(self.desired):
-                self.manager.start(host)
+                self._start_stream(host)
         else:
             self.manager.stop_all()
             # les interrupteurs restent tels quels, seuls les streams tombent
@@ -638,7 +766,10 @@ class VoiceTrayApp:
         if state == STARTING:
             self._set_host_ui(host, True, "connexion...", ORANGE)
         elif state == ON:
-            self._set_host_ui(host, True, "actif", GREEN)
+            text, color = "actif - %d ms" % self.manager.buffers[host], GREEN
+            if self.manager.is_unstable(host):
+                text, color = text + " - lien instable", ORANGE
+            self._set_host_ui(host, True, text, color)
         elif state == ERROR:
             self.desired.discard(host)
             self.restart_pending.discard(host)
@@ -649,8 +780,8 @@ class VoiceTrayApp:
             if host in self.restart_pending:
                 self.restart_pending.discard(host)
                 if self.transmitting and host in self.desired:
-                    # arret demande par set_buffer : repart aussitot
-                    self.manager.start(host)
+                    # arret demande pour changer de tampon : repart aussitot
+                    self._start_stream(host)
                     self._update_tray()
                     return
             if host in self.desired and not self.transmitting:

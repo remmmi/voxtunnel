@@ -1,6 +1,7 @@
 # Test de fumee multi-plateforme : decouverte des hosts, cycle
 # start -> actif -> transmission coupee -> retablie -> stop, avec de
-# faux moteurs (aucun ssh ni micro reel). Lance par la CI sur
+# faux moteurs (aucun ssh ni micro reel), et montee du tampon auto sur
+# underruns. Lance par la CI sur
 # ubuntu / macos / windows en QT_QPA_PLATFORM=offscreen.
 import importlib.util
 import os
@@ -30,16 +31,26 @@ spec.loader.exec_module(vt)
 hosts = vt.discover_hosts()
 assert hosts == ["alpha", "beta"], "decouverte: %r" % hosts
 
+# sonde factice : lien calme, le tampon auto part du plancher (40 ms)
+vt.vox_buffer.probe = lambda host: [30.0] * 100
+
+UNDERRUNS = "underrun!!! (at least 50.000 ms long)\n" * 3
 SLEEPER = [sys.executable, "-c", "import time; time.sleep(60)"]
 if vt.IS_LINUX:
+    # le faux moteur decroche tant que le tampon est au plancher
     engine = os.path.join(tmp, "fake-engine.sh")
     with open(engine, "w") as f:
-        f.write("#!/bin/sh\necho preflight\necho Streaming\nsleep 60\n")
+        f.write("#!/bin/sh\necho preflight\necho Streaming\n"
+                'if [ "$BUFFER_US" = 40000 ]; then printf \'%s\'; fi\n'
+                "sleep 60\n" % UNDERRUNS.replace("\n", "\\n"))
     os.chmod(engine, os.stat(engine).st_mode | stat.S_IEXEC)
     vt.VOICEPIPE = engine
 else:
     vt.capture_cmd = lambda: SLEEPER
-    vt.ssh_play_cmd = lambda host, ms: SLEEPER
+    vt.ssh_play_cmd = lambda host, ms: [
+        sys.executable, "-c",
+        "import sys, time; sys.stdout.write(%r if %d == 40 else ''); "
+        "sys.stdout.flush(); time.sleep(60)" % (UNDERRUNS, ms)]
 
 from PyQt5.QtCore import QTimer            # noqa: E402
 from PyQt5.QtWidgets import QApplication   # noqa: E402
@@ -66,7 +77,9 @@ def check(name, ok):
 QTimer.singleShot(300, lambda: ui.window.rows["alpha"].switch.setChecked(True))
 QTimer.singleShot(4500, lambda: check("stream lance", "alpha" in ui.manager.procs))
 QTimer.singleShot(4600, lambda: check(
-    "statut actif", ui.window.rows["alpha"].status.text() == "actif"))
+    "statut actif", ui.window.rows["alpha"].status.text() == "actif - 60 ms"))
+QTimer.singleShot(4700, lambda: check(
+    "tampon monte sur underruns", ui.manager.buffers.get("alpha") == 60))
 QTimer.singleShot(5000, lambda: ui.window.master_switch.setChecked(False))
 QTimer.singleShot(8000, lambda: check("coupure: plus de stream", not ui.manager.procs))
 QTimer.singleShot(8100, lambda: check(
@@ -83,7 +96,7 @@ app.exec_()
 for name, ok in results:
     print("%-30s %s" % (name, "ok" if ok else "ECHEC"))
 failed = [n for n, ok in results if not ok]
-if failed or len(results) != 6:
+if failed or len(results) != 7:
     print("SMOKE FAILED:", failed or "resultats incomplets")
     sys.exit(1)
 print("SMOKE OK (%s)" % sys.platform)

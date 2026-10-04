@@ -13,6 +13,13 @@ repository README for the full picture.
   `~/.ssh/config` (Host blocks that declare an IdentityFile), shows one
   toggle per host plus a master "Transmission" toggle, and runs one
   `voxtunnel.sh` process per active host.
+- `vox_buffer.py` — link test and automatic buffer sizing, imported by the
+  tray (no Qt inside, covered by `tests/test_buffer.py`). Before a stream it
+  probes the link through `ssh <host> cat` and picks a starting buffer per
+  host; during the stream it counts the remote `aplay` underruns in the host
+  log and asks the tray to restart that stream with a larger buffer. Nothing
+  is installed on the server. `python3 vox_buffer.py <host>` runs the probe
+  alone and prints the recommended buffer; it never opens the microphone.
 - `install.sh` — user-level install of the desktop launcher (no root).
 - `voxtunnel.desktop.in` — launcher template; `@DIR@` is replaced by
   the absolute path of this folder at install time.
