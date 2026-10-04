@@ -1,3 +1,4 @@
+1.3.0	2026-10-04	automatic per-host buffer (link probe, grows on underruns), update check with one-click install, server package version and update from the tray	tampon automatique par host (sonde du lien, montee sur underruns), verification des mises a jour avec installation en un clic, version et mise a jour du paquet serveur depuis le tray
 1.2.1	2026-08-12	VOX app icon shipped in menu entries, rebuilt packages	icone d'application VOX dans les menus, paquets reconstruits
 1.2.0	2026-08-10	experimental macOS and Windows clients, cross-platform tray, CI on 3 OSes	clients macOS et Windows experimentaux, tray multi-plateforme, CI sur 3 OS
 1.1.1	2026-08-10	guided install prompts (deps, audio group)	installation guidee (dependances, groupe audio)

@@ -23,7 +23,8 @@ mkdir -p "$ROOT/DEBIAN" \
          "$ROOT/usr/share/doc/voxtunnel"
 
 install -m 755 "$DIR/client/voxtunnel.sh" "$DIR/client/voxtunnel-tray.py" \
-        "$DIR/client/vox_buffer.py" "$ROOT/usr/share/voxtunnel/"
+        "$DIR/client/vox_buffer.py" "$DIR/client/vox_update.py" \
+        "$ROOT/usr/share/voxtunnel/"
 install -m 644 "$DIR/client/icons/"*.svg "$ROOT/usr/share/voxtunnel/icons/"
 install -m 644 "$DIR/client/icons/voxtunnel-on.svg" \
         "$ROOT/usr/share/icons/hicolor/scalable/apps/voxtunnel.svg"

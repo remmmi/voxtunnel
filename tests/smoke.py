@@ -34,6 +34,10 @@ assert hosts == ["alpha", "beta"], "decouverte: %r" % hosts
 # sonde factice : lien calme, le tampon auto part du plancher (40 ms)
 vt.vox_buffer.probe = lambda host: [30.0] * 100
 
+# release factice : aucun appel a GitHub pendant le test
+vt.vox_update.fetch_latest = lambda: vt.vox_update.Release(
+    "99.0.0", "https://example.invalid", {}, "notes de test")
+
 UNDERRUNS = "underrun!!! (at least 50.000 ms long)\n" * 3
 SLEEPER = [sys.executable, "-c", "import time; time.sleep(60)"]
 if vt.IS_LINUX:
@@ -80,6 +84,8 @@ QTimer.singleShot(6600, lambda: check(
     "statut actif", ui.window.rows["alpha"].status.text() == "actif - 60 ms"))
 QTimer.singleShot(6700, lambda: check(
     "tampon monte sur underruns", ui.manager.buffers.get("alpha") == 60))
+QTimer.singleShot(6800, lambda: check(
+    "mise a jour annoncee", "v99.0.0 disponible" in ui.window.update_label.text()))
 QTimer.singleShot(7000, lambda: ui.window.master_switch.setChecked(False))
 QTimer.singleShot(10000, lambda: check("coupure: plus de stream", not ui.manager.procs))
 QTimer.singleShot(10100, lambda: check(
@@ -96,7 +102,7 @@ app.exec_()
 for name, ok in results:
     print("%-30s %s" % (name, "ok" if ok else "ECHEC"))
 failed = [n for n, ok in results if not ok]
-if failed or len(results) != 7:
+if failed or len(results) != 8:
     print("SMOKE FAILED:", failed or "resultats incomplets")
     sys.exit(1)
 print("SMOKE OK (%s)" % sys.platform)

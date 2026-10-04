@@ -32,7 +32,7 @@ import tempfile
 import threading
 import time
 
-__version__ = "1.2.1"
+__version__ = "1.3.0"
 
 # Linux est la plateforme de reference (testee sur du vrai materiel).
 # macOS et Windows sont EXPERIMENTAUX : valides uniquement en CI,
@@ -41,8 +41,10 @@ IS_LINUX = sys.platform.startswith("linux")
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform.startswith("win")
 
-from PyQt5.QtCore import QLockFile, QObject, QRectF, QSize, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QIcon, QPainter, QPixmap
+from PyQt5.QtCore import (
+    QLockFile, QObject, QRectF, QSize, Qt, QTimer, QUrl, pyqtSignal,
+)
+from PyQt5.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QCheckBox, QFrame, QHBoxLayout, QLabel, QMenu, QSlider,
     QSystemTrayIcon, QVBoxLayout, QWidget,
@@ -51,6 +53,7 @@ from PyQt5.QtWidgets import (
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 import vox_buffer  # noqa: E402  (module voisin : sonde et tampon auto)
+import vox_update  # noqa: E402  (module voisin : mises a jour)
 
 VOICEPIPE = os.path.join(SCRIPT_DIR, "voxtunnel.sh")
 ICON_DIR = os.path.join(SCRIPT_DIR, "icons")
@@ -72,13 +75,25 @@ BUFFER_MAX_MS = vox_buffer.BUFFER_MAX_MS
 # de relancer un stream ; en deca le stream repart sans attendre la sonde
 PROBE_TTL_S = 600
 
+# verification des mises a jour : peu apres le lancement, puis une fois par jour
+UPDATE_FIRST_MS = 3000
+UPDATE_EVERY_MS = 24 * 3600 * 1000
+
+# verrou d'instance unique, relache avant de relancer l'app apres une
+# mise a jour
+INSTANCE_LOCK = None
+
 # Etat de l'ecoute cote VPS. R = pret (carte Loopback en place),
 # RL = pret et une capture est ouverte en ce moment (un substream pcm1c
 # non "closed"), N = pas de Loopback. Host injoignable = ssh en erreur.
+# Une seconde ligne V=<version> suit quand le paquet voxtunnel-server est
+# installe (voir vox_update.parse_listen).
 LISTEN_CMD = ("if [ -d /proc/asound/Loopback ]; then "
               "grep -L closed /proc/asound/Loopback/pcm1c/sub*/status "
               "2>/dev/null | grep -q . && echo RL || echo R; "
-              "else echo N; fi")
+              "else echo N; fi; "
+              "dpkg-query -W -f='V=${Version}\\n' voxtunnel-server "
+              "2>/dev/null || true")
 
 # micro pour les backends mac/windows : fichier optionnel avec le nom
 # (dshow) ou l'index avfoundation (":1") du peripherique
@@ -338,7 +353,8 @@ class ListenerChecker(QObject):
     loopback de chaque host (un process qui enregistre Loopback,1,0).
     Tout est non bloquant : un ssh par host, ramasse par un timer."""
 
-    result = pyqtSignal(str, bool, bool)  # host, pret, capture ouverte
+    # host, pret, capture ouverte, version du paquet serveur ('' = aucun)
+    result = pyqtSignal(str, bool, bool, str)
 
     SLOW_MS = 30000   # tous les hosts
     FAST_MS = 3000    # hosts avec un stream actif : l'ecoute distante peut
@@ -374,16 +390,17 @@ class ListenerChecker(QObject):
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL)
             except OSError:
-                self.result.emit(host, False, False)
+                self.result.emit(host, False, False, "")
 
     def _collect(self):
         for host, proc in list(self.pending.items()):
             if proc.poll() is None:
                 continue
             del self.pending[host]
-            out = (proc.stdout.read() if proc.stdout else b"").strip()
-            ready = proc.returncode == 0 and out in (b"R", b"RL")
-            self.result.emit(host, ready, out == b"RL")
+            out = proc.stdout.read() if proc.stdout else b""
+            ready, capture_open, version = vox_update.parse_listen(out)
+            self.result.emit(host, proc.returncode == 0 and ready,
+                             capture_open, version)
 
 
 class ToggleSwitch(QCheckBox):
@@ -467,7 +484,7 @@ class StatusDot(QLabel):
 
 
 class HostRow(QWidget):
-    def __init__(self, host, toggle_cb):
+    def __init__(self, host, toggle_cb, server_cb):
         super().__init__()
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 2, 8, 2)
@@ -480,6 +497,11 @@ class HostRow(QWidget):
         layout.addWidget(self.name)
         layout.addWidget(self.switch)
         layout.addWidget(self.status, 1)
+        # version du paquet serveur, avec un lien quand une release la depasse
+        self.server = QLabel()
+        self.server.setStyleSheet("font-size: 10px; color: %s;" % GRAY)
+        self.server.linkActivated.connect(lambda _href: server_cb(host))
+        layout.addWidget(self.server)
         self.switch.toggled.connect(lambda on: toggle_cb(host, on))
 
     def set_checked(self, checked):
@@ -493,7 +515,8 @@ class HostRow(QWidget):
 
 
 class MainWindow(QWidget):
-    def __init__(self, hosts, toggle_cb, master_cb, buffer_cb, auto_cb):
+    def __init__(self, hosts, toggle_cb, master_cb, buffer_cb, auto_cb,
+                 update_cb, server_cb):
         super().__init__()
         self.buffer_cb = buffer_cb
         self.auto_cb = auto_cb
@@ -523,7 +546,7 @@ class MainWindow(QWidget):
         if not hosts:
             layout.addWidget(QLabel("Aucun host avec clé trouvé dans ~/.ssh/config"))
         for host in hosts:
-            row = HostRow(host, toggle_cb)
+            row = HostRow(host, toggle_cb, server_cb)
             self.rows[host] = row
             layout.addWidget(row)
         if hosts:
@@ -566,6 +589,14 @@ class MainWindow(QWidget):
         layout.addLayout(buf)
         self._on_slider_changed(self.slider.value())
 
+        # annonce d'une release plus recente, vide tant qu'il n'y en a pas
+        self.update_label = QLabel()
+        self.update_label.setWordWrap(True)
+        self.update_label.setStyleSheet("font-size: 10px; margin: 0 8px;")
+        self.update_label.linkActivated.connect(update_cb)
+        self.update_label.hide()
+        layout.addWidget(self.update_label)
+
         link = QLabel('v%s — <a href="https://github.com/remmmi/voxtunnel" '
                       'style="color: %s;">voxtunnel</a>'
                       % (__version__, GRAY))
@@ -585,6 +616,10 @@ class MainWindow(QWidget):
         # au clavier il n'y a pas de sliderReleased : applique directement
         if not self.slider.isSliderDown():
             self.buffer_cb(value)
+
+    def set_update(self, html):
+        self.update_label.setText(html)
+        self.update_label.setVisible(bool(html))
 
     def set_voyant(self, on):
         self.voyant.set_on(on)
@@ -613,9 +648,21 @@ class VoiceTrayApp:
         self.probe_timer.timeout.connect(self._collect_probes)
         self.probe_timer.start(200)
 
+        self.release = None        # derniere release GitHub connue
+        self.server_versions = {}  # host -> version du paquet serveur
+        self.updating = set()      # "client" ou host : installation en vol
+        self.installed = False     # client mis a jour, relance attendue
+        self.update_results = queue.Queue()
+        self.probe_timer.timeout.connect(self._collect_updates)
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self._check_update)
+        self.update_timer.start(UPDATE_EVERY_MS)
+        QTimer.singleShot(UPDATE_FIRST_MS, self._check_update)
+
         self.window = MainWindow(self.hosts, self.toggle_host,
                                  self.set_transmitting, self.set_buffer,
-                                 self.set_auto)
+                                 self.set_auto, self._on_update_link,
+                                 self.update_server)
 
         self.checker = ListenerChecker(self.hosts)
         self.checker.result.connect(self._on_listener_result)
@@ -639,6 +686,8 @@ class VoiceTrayApp:
             act.toggled.connect(lambda on, h=host: self.toggle_host(h, on))
             self.actions[host] = act
         self.menu.addSeparator()
+        self.update_action = self.menu.addAction("", self.update_client)
+        self.update_action.setVisible(False)
         self.menu.addAction("Ouvrir la fenêtre", self._show_window)
         self.menu.addAction("Quitter", self._quit)
         self.tray.setContextMenu(self.menu)
@@ -740,10 +789,199 @@ class VoiceTrayApp:
         for host in list(self.manager.procs):
             self._restart(host)
 
-    def _on_listener_result(self, host, ready, capture_open):
+    def _on_listener_result(self, host, ready, capture_open, version):
         row = self.window.rows.get(host)
         if row:
             row.dot.set_state(ready, capture_open)
+        if ready:
+            self.server_versions[host] = version
+            self._refresh_server_ui(host)
+
+    # --- mises a jour --------------------------------------------------------
+
+    def _check_update(self):
+        threading.Thread(
+            target=lambda: self.update_results.put(
+                ("release", vox_update.fetch_latest())),
+            daemon=True).start()
+
+    def _collect_updates(self):
+        while True:
+            try:
+                result = self.update_results.get_nowait()
+            except queue.Empty:
+                return
+            if result[0] == "release":
+                if result[1] is not None:
+                    self.release = result[1]
+                    self._refresh_client_ui()
+                    for host in self.server_versions:
+                        self._refresh_server_ui(host)
+            elif result[0] == "client":
+                self._on_client_updated(*result[1:])
+            else:
+                self._on_server_updated(*result[1:])
+
+    def _client_update(self):
+        """Release a proposer pour ce client, ou None."""
+        rel = self.release
+        if rel and vox_update.is_newer(rel.version, __version__):
+            return rel
+        return None
+
+    def _refresh_client_ui(self):
+        rel = self._client_update()
+        if not rel or self.installed or "client" in self.updating:
+            return
+        one_click = (vox_update.is_deb_install(SCRIPT_DIR)
+                     and "voxtunnel" in rel.assets)
+        action = "installer" if one_click else "voir la release"
+        notes = " : " + rel.notes if rel.notes else ""
+        self.window.set_update(
+            'v%s disponible%s - <a href="#install" style="color: %s;">%s</a>'
+            % (rel.version, notes, GREEN, action))
+        self.update_action.setText("%s v%s" % (action.capitalize(), rel.version))
+        self.update_action.setVisible(True)
+
+    def _on_update_link(self, href):
+        if href == "#restart":
+            self._relaunch()
+        else:
+            self.update_client()
+
+    def update_client(self):
+        rel = self._client_update()
+        if not rel or "client" in self.updating:
+            return
+        asset = rel.assets.get("voxtunnel")
+        if not asset or not vox_update.is_deb_install(SCRIPT_DIR):
+            QDesktopServices.openUrl(QUrl(rel.page_url))
+            return
+        if self.manager.procs:
+            # l'installation remplace les fichiers du stream en cours
+            self.tray.showMessage(
+                "Voxtunnel", "Coupe la Transmission avant d'installer v%s."
+                % rel.version, QSystemTrayIcon.Information, 6000)
+            return
+        self.updating.add("client")
+        self.update_action.setVisible(False)
+        self.window.set_update("installation de v%s..." % rel.version)
+
+        def job():
+            try:
+                deb = vox_update.download(asset, LOG_DIR)
+                run = subprocess.run(vox_update.install_cmd(deb),
+                                     capture_output=True, text=True)
+                if run.returncode in (126, 127):
+                    message = "installation annulée (mot de passe refusé)"
+                else:
+                    lines = (run.stderr or run.stdout).strip().splitlines()
+                    message = lines[-1] if lines else ""
+                self.update_results.put(
+                    ("client", run.returncode == 0, rel.version, message))
+            except (vox_update.UpdateError, OSError) as e:
+                self.update_results.put(("client", False, rel.version, str(e)))
+
+        threading.Thread(target=job, daemon=True).start()
+
+    def _on_client_updated(self, ok, version, message):
+        self.updating.discard("client")
+        if ok:
+            self.installed = True
+            self.window.set_update(
+                'v%s installée - <a href="#restart" style="color: %s;">'
+                'relancer</a>' % (version, GREEN))
+            self.update_action.setText("Relancer en v%s" % version)
+            self.update_action.triggered.disconnect()
+            self.update_action.triggered.connect(self._relaunch)
+            self.update_action.setVisible(True)
+        else:
+            self._refresh_client_ui()
+            self.tray.showMessage("Voxtunnel — mise à jour", message,
+                                  QSystemTrayIcon.Warning, 8000)
+
+    def _relaunch(self):
+        self.manager.stop_all()
+
+        def restart():
+            if INSTANCE_LOCK is not None:
+                INSTANCE_LOCK.unlock()
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+
+        # laisse une seconde aux SIGTERM avant de repartir
+        QTimer.singleShot(1000, restart)
+
+    def _server_update(self, host):
+        """Release a proposer pour le paquet serveur de `host`, ou None."""
+        rel, version = self.release, self.server_versions.get(host)
+        if (rel and version and "voxtunnel-server" in rel.assets
+                and vox_update.is_newer(rel.version, version)):
+            return rel
+        return None
+
+    def _refresh_server_ui(self, host):
+        row = self.window.rows.get(host)
+        if not row or host in self.updating:
+            return
+        version = self.server_versions.get(host)
+        if not version:
+            row.server.setText("srv hors paquet")
+        elif self._server_update(host):
+            row.server.setText(
+                'srv %s - <a href="#server" style="color: %s;">passer en %s</a>'
+                % (version, GREEN, self.release.version))
+        else:
+            row.server.setText("srv " + version)
+
+    def update_server(self, host):
+        rel = self._server_update(host)
+        row = self.window.rows.get(host)
+        if not rel or not row or host in self.updating:
+            return
+        asset = rel.assets["voxtunnel-server"]
+        self.updating.add(host)
+        row.server.setText("srv : installation de %s..." % rel.version)
+
+        def job():
+            try:
+                deb = vox_update.download(asset, LOG_DIR)
+                copy = subprocess.run(vox_update.server_copy_cmd(host, deb),
+                                      capture_output=True, text=True,
+                                      stdin=subprocess.DEVNULL)
+                if copy.returncode != 0:
+                    raise vox_update.UpdateError(
+                        "envoi du paquet impossible : " + copy.stderr.strip())
+                run = subprocess.run(
+                    vox_update.server_install_cmd(host, asset.name),
+                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
+                # echec ici = sudo veut un mot de passe : le paquet est deja
+                # sur le VPS, il reste une commande a coller
+                self.update_results.put(
+                    ("server", host, run.returncode == 0,
+                     vox_update.server_manual_cmd(asset.name)))
+            except (vox_update.UpdateError, OSError) as e:
+                self.update_results.put(("server", host, False, str(e)))
+
+        threading.Thread(target=job, daemon=True).start()
+
+    def _on_server_updated(self, host, ok, message):
+        self.updating.discard(host)
+        if ok:
+            # la sonde d'ecoute relira la version installee
+            self.server_versions.pop(host, None)
+            self.checker._launch([host])
+            row = self.window.rows.get(host)
+            if row:
+                row.server.setText("srv : mis à jour")
+            return
+        self._refresh_server_ui(host)
+        if message.startswith("sudo "):
+            self.app.clipboard().setText(message)
+            message = ("sudo demande un mot de passe sur %s. Commande à coller "
+                       "sur le VPS (copiée dans le presse-papiers) :\n%s"
+                       % (host, message))
+        self.tray.showMessage("Voxtunnel — " + host, message,
+                              QSystemTrayIcon.Warning, 12000)
 
     def set_transmitting(self, on):
         self.transmitting = on
@@ -868,6 +1106,8 @@ def main():
     if not lock.tryLock(100):
         print("voxtunnel: deja lance", file=sys.stderr)
         return 1
+    global INSTANCE_LOCK
+    INSTANCE_LOCK = lock
 
     # le verrou garantit qu'aucune autre instance ne tourne : tout
     # voxtunnel.sh restant est un orphelin a purger

@@ -20,6 +20,18 @@ repository README for the full picture.
   log and asks the tray to restart that stream with a larger buffer. Nothing
   is installed on the server. `python3 vox_buffer.py <host>` runs the probe
   alone and prints the recommended buffer; it never opens the microphone.
+- `vox_update.py` — update check and install, imported by the tray (no Qt
+  inside, covered by `tests/test_update.py`). The latest GitHub release of
+  the repository is the reference: the tray queries it shortly after launch
+  and once a day, announces a newer version in the window footer and the
+  tray menu, and on click downloads the client `.deb`, checks its SHA-256
+  against the release metadata and installs it through `pkexec apt-get`
+  (Debian package installs only; any other install opens the release page).
+  It never installs while a stream is running. Each host row also shows the
+  `voxtunnel-server` package version read over the existing listener probe;
+  a click pushes the server `.deb` by `scp` and installs it with `sudo -n`,
+  falling back to a command to paste when sudo needs a password.
+  `python3 vox_update.py` prints the latest release.
 - `install.sh` — user-level install of the desktop launcher (no root).
 - `voxtunnel.desktop.in` — launcher template; `@DIR@` is replaced by
   the absolute path of this folder at install time.
@@ -54,6 +66,8 @@ ALSA/PulseAudio/PipeWire stack.
   key paths: they are private. The app reads them at runtime only.
 - Do not start a stream toward a host without the user asking: it sends
   live microphone audio.
+- Never make the tray install anything by itself, locally or on a server:
+  every install is one explicit click.
 - SSH access must use keys (`BatchMode=yes`); never store passwords.
 - Keep `voxtunnel.sh` free of automatic retry loops (see its header
   comment for why).
