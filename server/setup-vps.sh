@@ -42,11 +42,16 @@ say "Loopback card: ok"
 
 # --- persistence (optional) ---------------------------------------------------
 if [ "${1:-}" = "--persist" ]; then
-  CONF=/etc/modules-load.d/snd-aloop.conf
-  if [ -f "$CONF" ] && grep -q '^snd-aloop$' "$CONF"; then
-    say "persistence: already configured ($CONF)"
+  # Same file as the voxtunnel-server package. Any file already loading the
+  # module counts (snd-aloop.conf written by earlier versions of this script,
+  # or a line added by hand): never a second one.
+  CONF=/etc/modules-load.d/voxtunnel-snd-aloop.conf
+  FOUND="$(grep -lsxE 'snd[-_]aloop' /etc/modules-load.d/*.conf | head -n 1 || true)"
+  if [ -n "$FOUND" ]; then
+    say "persistence: already configured ($FOUND)"
   else
-    echo snd-aloop >> "$CONF"
+    echo snd-aloop > "$CONF"
+    chmod 0644 "$CONF"
     say "persistence: snd-aloop added to $CONF"
   fi
 fi

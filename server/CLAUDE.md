@@ -51,4 +51,8 @@ rmmod snd-aloop                                # unload for this boot
 rm -f /etc/modules-load.d/voxtunnel-snd-aloop.conf       # remove persistence
 ```
 
+Servers prepared by an earlier `setup-vps.sh` have the same line in
+`/etc/modules-load.d/snd-aloop.conf` instead: the script recognises it and
+does not add a second file; remove that one for a rollback.
+
 Nothing else was changed.

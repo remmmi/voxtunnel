@@ -71,7 +71,9 @@ sudo apt install ./voxtunnel-server_*.deb
 ```
 
 Other distributions, or no package wanted: `server/setup-vps.sh --persist` from a clone of the
-repository, as root. It is idempotent and writes one line to `/etc/modules-load.d/snd-aloop.conf`.
+repository, as root. It is idempotent and writes one line to the same file as the package, unless a
+file in `/etc/modules-load.d/` already loads the module (earlier versions of the script wrote
+`snd-aloop.conf`).
 
 The SSH user that receives the stream must be allowed to open audio devices: on most distributions,
 membership of the `audio` group. Check with `id -nG <user>`; if missing, propose
