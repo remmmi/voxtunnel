@@ -142,7 +142,7 @@ def probe(host, duration=PROBE_S, cmd=None, timeout=15.0):
     def reader():
         for line in proc.stdout:
             try:
-                received[int(line.split(b" ", 1)[0])] = time.monotonic()
+                received[int(line.split(b" ", 1)[0])] = time.perf_counter()
             except ValueError:
                 continue
             ready.set()
@@ -159,20 +159,20 @@ def probe(host, duration=PROBE_S, cmd=None, timeout=15.0):
     try:
         # le bloc 0 paie l'ouverture de la connexion : il n'est pas mesure
         send(0)
-        limit = time.monotonic() + timeout
+        limit = time.perf_counter() + timeout
         while (not ready.wait(0.05) and proc.poll() is None
-               and time.monotonic() < limit):
+               and time.perf_counter() < limit):
             pass
         if ready.is_set():
-            seq, end = 0, time.monotonic() + duration
-            while time.monotonic() < end:
+            seq, end = 0, time.perf_counter() + duration
+            while time.perf_counter() < end:
                 seq += 1
-                sent[seq] = time.monotonic()
+                sent[seq] = time.perf_counter()
                 send(seq)
                 time.sleep(PROBE_INTERVAL_S)
             # laisse rentrer les derniers echos
-            limit = time.monotonic() + 2.0
-            while seq not in received and time.monotonic() < limit:
+            limit = time.perf_counter() + 2.0
+            while seq not in received and time.perf_counter() < limit:
                 time.sleep(0.02)
     except (OSError, ValueError):
         pass

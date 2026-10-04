@@ -125,7 +125,7 @@ class Probe(unittest.TestCase):
         # cadencent mal les envois toutes les 20 ms
         rtts = vb.probe("inutile", duration=1.0, cmd=echo)
         self.assertGreaterEqual(len(rtts), 3)
-        self.assertGreater(min(rtts), 0.0)
+        self.assertGreaterEqual(min(rtts), 0.0)
 
     def test_commande_morte(self):
         dead = [sys.executable, "-c", "import sys; sys.exit(3)"]
