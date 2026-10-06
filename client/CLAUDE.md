@@ -20,6 +20,15 @@ repository README for the full picture.
   log and asks the tray to restart that stream with a larger buffer. Nothing
   is installed on the server. `python3 vox_buffer.py <host>` runs the probe
   alone and prints the recommended buffer; it never opens the microphone.
+- `vox_codec.py` — codec choice and the encode/decode commands, imported
+  by the tray (no Qt inside, covered by `tests/test_codec.py`). Two modes:
+  `pcm` (raw s16, 768 kbit/s, no dependency) and `opus` (Ogg Opus
+  24 kbit/s through `ffmpeg -c:a libopus` here and `opusdec | aplay` on
+  the server). The listener probe reports whether `opusdec` exists on
+  each host; the tray picks `opus` only when both ends can, otherwise
+  `pcm`, and shows the mode in the host row (`actif (opus) - 300 ms`).
+  `voxtunnel.sh` carries the same ffmpeg options in bash (`CODEC=auto`
+  by default): change both together.
 - `vox_update.py` — update check and install, imported by the tray (no Qt
   inside, covered by `tests/test_update.py`). The latest GitHub release of
   the repository is the reference: the tray queries it shortly after launch
@@ -50,6 +59,7 @@ ALSA/PulseAudio/PipeWire stack.
    - `python3` and PyQt5 (`python3-pyqt5` on Debian/Ubuntu,
      `python3-qt5` on Fedora, `python-pyqt5` on Arch)
    - `alsa-utils` (for `arecord`) or `ffmpeg` as fallback recorder
+   - optional: `ffmpeg` with `libopus` (Debian's has it) for the Opus mode
    - `openssh-client`
    - optional: `sox` (only for `voxtunnel.sh --tone`)
 2. `./install.sh` installs the menu launcher for the current user only

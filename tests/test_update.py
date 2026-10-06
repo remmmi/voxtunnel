@@ -130,15 +130,22 @@ class Commands(unittest.TestCase):
 
 class ParseListen(unittest.TestCase):
     def test_pret_avec_paquet(self):
-        self.assertEqual(vu.parse_listen(b"RL\nV=1.2.1\n"), (True, True, "1.2.1"))
-        self.assertEqual(vu.parse_listen(b"R\nV=1.2.1\n"), (True, False, "1.2.1"))
+        self.assertEqual(vu.parse_listen(b"RL\nV=1.2.1\n"),
+                         (True, True, "1.2.1", False))
+        self.assertEqual(vu.parse_listen(b"R\nV=1.2.1\n"),
+                         (True, False, "1.2.1", False))
 
     def test_pret_hors_paquet(self):
-        self.assertEqual(vu.parse_listen(b"R\n"), (True, False, ""))
+        self.assertEqual(vu.parse_listen(b"R\n"), (True, False, "", False))
+
+    def test_decodeur_opus_present(self):
+        self.assertEqual(vu.parse_listen(b"R\nV=1.4.0\nO\n"),
+                         (True, False, "1.4.0", True))
+        self.assertEqual(vu.parse_listen(b"RL\nO\n"), (True, True, "", True))
 
     def test_pas_de_loopback(self):
-        self.assertEqual(vu.parse_listen(b"N\n"), (False, False, ""))
-        self.assertEqual(vu.parse_listen(b""), (False, False, ""))
+        self.assertEqual(vu.parse_listen(b"N\n"), (False, False, "", False))
+        self.assertEqual(vu.parse_listen(b""), (False, False, "", False))
 
 
 if __name__ == "__main__":

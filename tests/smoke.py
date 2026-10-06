@@ -50,8 +50,8 @@ if vt.IS_LINUX:
     os.chmod(engine, os.stat(engine).st_mode | stat.S_IEXEC)
     vt.VOICEPIPE = engine
 else:
-    vt.capture_cmd = lambda: SLEEPER
-    vt.ssh_play_cmd = lambda host, ms: [
+    vt.capture_cmd = lambda codec="pcm": SLEEPER
+    vt.ssh_play_cmd = lambda host, ms, codec="pcm": [
         sys.executable, "-c",
         "import sys, time; sys.stdout.write(%r if %d == 40 else ''); "
         "sys.stdout.flush(); time.sleep(60)" % (UNDERRUNS, ms)]
@@ -81,7 +81,7 @@ def check(name, ok):
 QTimer.singleShot(300, lambda: ui.window.rows["alpha"].switch.setChecked(True))
 QTimer.singleShot(6500, lambda: check("stream lance", "alpha" in ui.manager.procs))
 QTimer.singleShot(6600, lambda: check(
-    "statut actif", ui.window.rows["alpha"].status.text() == "actif - 60 ms"))
+    "statut actif", ui.window.rows["alpha"].status.text() == "actif (pcm) - 60 ms"))
 QTimer.singleShot(6700, lambda: check(
     "tampon monte sur underruns", ui.manager.buffers.get("alpha") == 60))
 QTimer.singleShot(6800, lambda: check(

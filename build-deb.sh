@@ -47,7 +47,7 @@ Section: sound
 Priority: optional
 Architecture: all
 Depends: python3, python3-pyqt5, alsa-utils, openssh-client
-Recommends: sox
+Recommends: ffmpeg, sox
 Conflicts: voicepipe
 Replaces: voicepipe
 Maintainer: remmmi <remmmi@users.noreply.github.com>
@@ -57,6 +57,8 @@ Description: Stream the local microphone to a VPS over SSH
  remote server over SSH, so voice tools running there can record it as
  a regular capture device. Ships a tray app with one switch per SSH
  host (discovered from ~/.ssh/config) and a master transmission toggle.
+ Audio travels as Ogg Opus (24 kbit/s) when ffmpeg is present here and
+ opus-tools on the server, as raw PCM otherwise.
  The server side only needs alsa-utils and the snd-aloop module (see
  the server/ folder of the homepage repository).
 EOF
@@ -84,6 +86,7 @@ Section: sound
 Priority: optional
 Architecture: all
 Depends: alsa-utils, kmod
+Recommends: opus-tools
 Conflicts: voicepipe-server
 Replaces: voicepipe-server
 Maintainer: remmmi <remmmi@users.noreply.github.com>

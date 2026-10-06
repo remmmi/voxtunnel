@@ -54,6 +54,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 import vox_buffer  # noqa: E402  (module voisin : sonde et tampon auto)
 import vox_update  # noqa: E402  (module voisin : mises a jour)
+import vox_codec   # noqa: E402  (module voisin : pcm ou opus)
 
 VOICEPIPE = os.path.join(SCRIPT_DIR, "voxtunnel.sh")
 ICON_DIR = os.path.join(SCRIPT_DIR, "icons")
@@ -86,14 +87,15 @@ INSTANCE_LOCK = None
 # Etat de l'ecoute cote VPS. R = pret (carte Loopback en place),
 # RL = pret et une capture est ouverte en ce moment (un substream pcm0c
 # non "closed"), N = pas de Loopback. Host injoignable = ssh en erreur.
-# Une seconde ligne V=<version> suit quand le paquet voxtunnel-server est
-# installe (voir vox_update.parse_listen).
+# Une ligne V=<version> suit quand le paquet voxtunnel-server est installe,
+# et une ligne O quand opusdec est la (voir vox_update.parse_listen).
 LISTEN_CMD = ("if [ -d /proc/asound/Loopback ]; then "
               "grep -L closed /proc/asound/Loopback/pcm0c/sub*/status "
               "2>/dev/null | grep -q . && echo RL || echo R; "
               "else echo N; fi; "
               "dpkg-query -W -f='V=${Version}\\n' voxtunnel-server "
-              "2>/dev/null || true")
+              "2>/dev/null; command -v opusdec >/dev/null 2>&1 && echo O; "
+              "true")
 
 # micro pour les backends mac/windows : fichier optionnel avec le nom
 # (dshow) ou l'index avfoundation (":1") du peripherique
@@ -127,13 +129,16 @@ def detect_dshow_mic():
     return None
 
 
-def capture_cmd():
-    """Capture micro -> PCM s16le mono 48 kHz sur stdout (mac/windows).
-    Sur Linux c'est voxtunnel.sh qui s'en charge."""
+def capture_cmd(codec="pcm"):
+    """Capture micro -> stdout (mac/windows) : PCM s16le mono 48 kHz, ou
+    Ogg Opus quand codec vaut "opus". Sur Linux c'est voxtunnel.sh qui
+    s'en charge."""
+    out = (vox_codec.opus_output_args(48000) if codec == "opus"
+           else ["-f", "s16le", "-ar", "48000", "-ac", "1", "-"])
     if IS_MAC:
         return ["ffmpeg", "-hide_banner", "-loglevel", "error",
                 "-f", "avfoundation", "-i", mic_device() or ":0",
-                "-f", "s16le", "-ar", "48000", "-ac", "1", "-"]
+                ] + out
     if IS_WIN:
         dev = mic_device() or detect_dshow_mic()
         if not dev:
@@ -142,17 +147,16 @@ def capture_cmd():
         return ["ffmpeg", "-hide_banner", "-loglevel", "error",
                 "-f", "dshow", "-audio_buffer_size", "20",
                 "-i", "audio=" + dev,
-                "-f", "s16le", "-ar", "48000", "-ac", "1", "-"]
+                ] + out
     raise ValueError("pas de backend de capture pour cette plateforme")
 
 
-def ssh_play_cmd(host, buffer_ms):
+def ssh_play_cmd(host, buffer_ms, codec="pcm"):
     """Lecture distante vers le loopback, memes reglages que voxtunnel.sh."""
     return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
             "-o", "Compression=no", "-o", "IPQoS=lowdelay", host,
-            "aplay -D plughw:Loopback,0,0 -f S16_LE -c 1 -r 48000 -t raw -q "
-            "--buffer-time=%d --period-time=%d"
-            % (buffer_ms * 1000, vox_buffer.period_us(buffer_ms))]
+            vox_codec.remote_cmd(codec, 48000, buffer_ms * 1000,
+                                 vox_buffer.period_us(buffer_ms))]
 
 
 def discover_hosts():
@@ -209,6 +213,7 @@ class StreamManager(QObject):
         self.buffer_ms = BUFFER_DEFAULT_MS   # tampon manuel (slider)
         self.auto = True     # tampon choisi et surveille par host
         self.buffers = {}    # host -> tampon du stream en cours (ms)
+        self.codecs = {}     # host -> codec du stream en cours
         self.watchers = {}   # host -> vox_buffer.Watcher
         self.log_pos = {}    # host -> octets du log deja lus
         os.makedirs(LOG_DIR, exist_ok=True)
@@ -226,7 +231,7 @@ class StreamManager(QObject):
         watcher = self.watchers.get(host)
         return bool(watcher and watcher.unstable)
 
-    def start(self, host, buffer_ms=None):
+    def start(self, host, buffer_ms=None, codec="pcm"):
         if host in self.procs:
             return
         ms = buffer_ms or self.buffer_ms
@@ -235,7 +240,7 @@ class StreamManager(QObject):
             if IS_LINUX:
                 # chemin de reference : le script fait tout, dans son
                 # propre groupe de process
-                env = dict(os.environ, VPS_HOST=host,
+                env = dict(os.environ, VPS_HOST=host, CODEC=codec,
                            BUFFER_US=str(ms * 1000),
                            PERIOD_US=str(vox_buffer.period_us(ms)))
                 procs = [subprocess.Popen(
@@ -246,10 +251,10 @@ class StreamManager(QObject):
                 # mac/windows : pipeline capture | ssh monte ici meme
                 flags = {"creationflags": NO_WINDOW} if IS_WIN else {}
                 cap = subprocess.Popen(
-                    capture_cmd(), stdout=subprocess.PIPE, stderr=log,
+                    capture_cmd(codec), stdout=subprocess.PIPE, stderr=log,
                     stdin=subprocess.DEVNULL, **flags)
                 play = subprocess.Popen(
-                    ssh_play_cmd(host, ms), stdin=cap.stdout,
+                    ssh_play_cmd(host, ms, codec), stdin=cap.stdout,
                     stdout=log, stderr=subprocess.STDOUT, **flags)
                 cap.stdout.close()
                 procs = [cap, play]
@@ -261,6 +266,7 @@ class StreamManager(QObject):
         self.procs[host] = procs
         self.started[host] = time.monotonic()
         self.buffers[host] = ms
+        self.codecs[host] = codec
         self.watchers[host] = vox_buffer.Watcher(ms)
         self.log_pos[host] = 0
         self.state_changed.emit(host, STARTING, "")
@@ -353,8 +359,9 @@ class ListenerChecker(QObject):
     loopback de chaque host (un process qui enregistre Loopback,0,0).
     Tout est non bloquant : un ssh par host, ramasse par un timer."""
 
-    # host, pret, capture ouverte, version du paquet serveur ('' = aucun)
-    result = pyqtSignal(str, bool, bool, str)
+    # host, pret, capture ouverte, version du paquet serveur ('' = aucun),
+    # decodeur opus present
+    result = pyqtSignal(str, bool, bool, str, bool)
 
     SLOW_MS = 30000   # tous les hosts
     FAST_MS = 3000    # hosts avec un stream actif : l'ecoute distante peut
@@ -390,7 +397,7 @@ class ListenerChecker(QObject):
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL)
             except OSError:
-                self.result.emit(host, False, False, "")
+                self.result.emit(host, False, False, "", False)
 
     def _collect(self):
         for host, proc in list(self.pending.items()):
@@ -398,9 +405,9 @@ class ListenerChecker(QObject):
                 continue
             del self.pending[host]
             out = proc.stdout.read() if proc.stdout else b""
-            ready, capture_open, version = vox_update.parse_listen(out)
+            ready, capture_open, version, opus = vox_update.parse_listen(out)
             self.result.emit(host, proc.returncode == 0 and ready,
-                             capture_open, version)
+                             capture_open, version, opus)
 
 
 class ToggleSwitch(QCheckBox):
@@ -655,6 +662,7 @@ class VoiceTrayApp:
         self.transmitting = True   # etat du voyant / interrupteur maitre
         self.restart_pending = set()  # a relancer des que leur arret est acte
         self.host_buffer = {}      # host -> (tampon auto en ms, instant mesure)
+        self.host_opus = {}        # host -> opusdec present (sonde d'ecoute)
         self.probing = set()       # hosts dont la sonde est en vol
         self.probe_results = queue.Queue()  # (host, allers-retours en ms)
         self.probe_timer = QTimer()
@@ -742,8 +750,9 @@ class VoiceTrayApp:
         """Lance le stream ; en mode auto, sonde d'abord le lien si la
         derniere mesure du host est absente ou trop vieille."""
         if not self.manager.auto:
-            self.manager.start(host)
+            self.manager.start(host, codec=self._codec(host))
             return
+        codec = self._codec(host)
         known = self.host_buffer.get(host)
         if known and time.monotonic() - known[1] < PROBE_TTL_S:
             self.manager.start(host, known[0])
@@ -802,11 +811,19 @@ class VoiceTrayApp:
         for host in list(self.manager.procs):
             self._restart(host)
 
-    def _on_listener_result(self, host, ready, capture_open, version):
+    def _codec(self, host):
+        """Opus si la sonde d'ecoute a vu opusdec et que ffmpeg encode ici,
+        sinon le PCM brut d'origine (un stream deja lance garde son codec
+        jusqu'a son prochain lancement)."""
+        return vox_codec.choose(self.host_opus.get(host, False),
+                                vox_codec.have_local_opus())
+
+    def _on_listener_result(self, host, ready, capture_open, version, opus):
         row = self.window.rows.get(host)
         if row:
             row.dot.set_state(ready, capture_open)
         if ready:
+            self.host_opus[host] = opus
             self.server_versions[host] = version
             self._refresh_server_ui(host)
 
@@ -1017,7 +1034,9 @@ class VoiceTrayApp:
         if state == STARTING:
             self._set_host_ui(host, True, "connexion...", ORANGE)
         elif state == ON:
-            text, color = "actif - %d ms" % self.manager.buffers[host], GREEN
+            text, color = ("actif (%s) - %d ms" % (self.manager.codecs[host],
+                                                   self.manager.buffers[host]),
+                           GREEN)
             if self.manager.is_unstable(host):
                 text, color = text + " - lien instable", ORANGE
             self._set_host_ui(host, True, text, color)

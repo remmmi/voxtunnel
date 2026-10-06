@@ -176,14 +176,18 @@ def server_manual_cmd(deb_name):
 
 def parse_listen(out):
     """Sortie de la sonde d'ecoute -> (pret, capture ouverte, version du
-    paquet voxtunnel-server ou '' s'il n'est pas installe)."""
+    paquet voxtunnel-server ou '' s'il n'est pas installe, decodeur opus
+    present)."""
     lines = out.decode(errors="replace").split()
     state = lines[0] if lines else ""
     version = ""
+    opus = False
     for line in lines[1:]:
         if line.startswith("V="):
             version = line[2:]
-    return state in ("R", "RL"), state == "RL", version
+        elif line == "O":
+            opus = True
+    return state in ("R", "RL"), state == "RL", version, opus
 
 
 def main():
