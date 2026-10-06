@@ -661,7 +661,8 @@ class VoiceTrayApp:
         self.desired = set()       # hosts dont l'interrupteur est ON
         self.transmitting = True   # etat du voyant / interrupteur maitre
         self.restart_pending = set()  # a relancer des que leur arret est acte
-        self.host_buffer = {}      # host -> (tampon auto en ms, instant mesure)
+        self.host_buffer = {}      # host -> (tampon auto en ms, instant
+                                   #          mesure, codec de la mesure)
         self.host_opus = {}        # host -> opusdec present (sonde d'ecoute)
         self.probing = set()       # hosts dont la sonde est en vol
         self.probe_results = queue.Queue()  # (host, allers-retours en ms)
@@ -754,8 +755,13 @@ class VoiceTrayApp:
             return
         codec = self._codec(host)
         known = self.host_buffer.get(host)
+        if known and known[2] != codec:
+            # un tampon mesure en pcm ne dit rien du lien en opus (ni
+            # l'inverse) : on repart de zero, sans palier de descente
+            del self.host_buffer[host]
+            known = None
         if known and time.monotonic() - known[1] < PROBE_TTL_S:
-            self.manager.start(host, known[0])
+            self.manager.start(host, known[0], codec)
             return
         self._set_host_ui(host, True, "mesure du lien...", ORANGE)
         if host in self.probing:
@@ -763,24 +769,26 @@ class VoiceTrayApp:
         self.probing.add(host)
         threading.Thread(
             target=lambda: self.probe_results.put(
-                (host, vox_buffer.probe(host))),
+                (host, codec, vox_buffer.probe(
+                    host, block=vox_buffer.probe_block(codec)))),
             daemon=True).start()
 
     def _collect_probes(self):
         while True:
             try:
-                host, rtts = self.probe_results.get_nowait()
+                host, codec, rtts = self.probe_results.get_nowait()
             except queue.Empty:
                 return
             self.probing.discard(host)
             previous = self.host_buffer.get(host, (None,))[0]
             ms = vox_buffer.recommend(rtts, previous)
             if ms:
-                self.host_buffer[host] = (ms, time.monotonic())
+                self.host_buffer[host] = (ms, time.monotonic(), codec)
             # sonde en echec : le stream part quand meme, son preflight
             # affichera la vraie erreur
             if self.transmitting and host in self.desired:
-                self.manager.start(host, ms if self.manager.auto else None)
+                self.manager.start(host, ms if self.manager.auto else None,
+                                   codec)
                 self._update_tray()
 
     def _restart(self, host):
@@ -789,7 +797,8 @@ class VoiceTrayApp:
 
     def _on_buffer_wanted(self, host, ms):
         # trop d'underruns : le stream repart avec un tampon plus grand
-        self.host_buffer[host] = (ms, time.monotonic())
+        self.host_buffer[host] = (ms, time.monotonic(),
+                                  self.manager.codecs.get(host, "pcm"))
         self._restart(host)
 
     def set_auto(self, on):

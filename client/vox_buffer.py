@@ -31,12 +31,15 @@ BUFFER_MIN_MS, BUFFER_DEFAULT_MS, BUFFER_MAX_MS = 40, 80, 1500
 PERIOD_MAX_MS = 50
 
 # --- sonde -------------------------------------------------------------------
-# La sonde imite le debit du vrai stream (PCM s16 mono 48 kHz) : un bloc de
-# 20 ms d'audio toutes les 20 ms, renvoye par `cat`. Des paquets plus petits
-# seraient retenus par l'algorithme de Nagle et fausseraient la mesure.
+# La sonde imite le debit du vrai stream : un bloc de 20 ms d'audio toutes
+# les 20 ms, renvoye par `cat`. La taille suit le codec, c'est decisif : a
+# 1920 octets (PCM) la sonde sature elle-meme la montee d'un lien lent et
+# conseille 1000 ms la ou le stream Opus (60 octets) tient avec 60-90 ms.
+# Mesure sur un tel lien, les blocs de 60 octets ne sont pas retenus par
+# Nagle (min 41 ms, comme le ping).
 PROBE_S = 2.0
 PROBE_INTERVAL_S = 0.02
-PROBE_BLOCK = 1920
+PROBE_BLOCK = {"pcm": 1920, "opus": 60}
 MIN_SAMPLES = 20          # en dessous, la mesure ne vaut rien
 MARGIN = 1.5              # tampon = p99 de la gigue x marge
 
@@ -52,6 +55,11 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # aplay traduit son message et sa virgule decimale selon la locale du VPS
 UNDERRUN_RE = re.compile(r"!!!\D*([0-9]+(?:[.,][0-9]+)?)\s*ms")
+
+
+def probe_block(codec):
+    """Octets par bloc de sonde pour imiter le debit du codec."""
+    return PROBE_BLOCK[codec]
 
 
 def period_us(buffer_ms):
@@ -125,9 +133,11 @@ def probe_cmd(host):
             "-o", "Compression=no", "-o", "IPQoS=lowdelay", host, "cat"]
 
 
-def probe(host, duration=PROBE_S, cmd=None, timeout=15.0):
-    """Allers-retours (ms) de blocs envoyes dans `ssh host cat` pendant
-    `duration` secondes. Liste vide si le lien ne repond pas."""
+def probe(host, duration=PROBE_S, cmd=None, timeout=15.0,
+          block=PROBE_BLOCK["pcm"]):
+    """Allers-retours (ms) de blocs de `block` octets envoyes dans
+    `ssh host cat` pendant `duration` secondes. Liste vide si le lien ne
+    repond pas."""
     try:
         proc = subprocess.Popen(
             cmd or probe_cmd(host), stdin=subprocess.PIPE,
@@ -152,7 +162,7 @@ def probe(host, duration=PROBE_S, cmd=None, timeout=15.0):
 
     def send(seq):
         head = b"%d " % seq
-        proc.stdin.write(head + b"0" * (PROBE_BLOCK - len(head) - 1) + b"\n")
+        proc.stdin.write(head + b"0" * (block - len(head) - 1) + b"\n")
         proc.stdin.flush()
 
     sent = {}
@@ -192,12 +202,15 @@ def probe(host, duration=PROBE_S, cmd=None, timeout=15.0):
 
 
 def main(argv):
-    if len(argv) != 2 or argv[1] in ("-h", "--help"):
-        print("usage: vox_buffer.py <host>   (host SSH, comme VPS_HOST)",
-              file=sys.stderr)
+    if len(argv) not in (2, 3) or argv[1] in ("-h", "--help") \
+            or (len(argv) == 3 and argv[2] not in PROBE_BLOCK):
+        print("usage: vox_buffer.py <host> [pcm|opus]   (host SSH, comme "
+              "VPS_HOST ; codec du stream, pcm par defaut)", file=sys.stderr)
         return 2
-    print("vox_buffer — sonde de %.0f s (aucun micro ouvert)" % PROBE_S)
-    rtts = probe(argv[1])
+    codec = argv[2] if len(argv) == 3 else "pcm"
+    print("vox_buffer — sonde de %.0f s en %s (aucun micro ouvert)"
+          % (PROBE_S, codec))
+    rtts = probe(argv[1], block=probe_block(codec))
     ms = recommend(rtts)
     if ms is None:
         print("  lien injoignable ou mesure trop courte (%d blocs)" % len(rtts),

@@ -32,7 +32,7 @@ hosts = vt.discover_hosts()
 assert hosts == ["alpha", "beta"], "decouverte: %r" % hosts
 
 # sonde factice : lien calme, le tampon auto part du plancher (40 ms)
-vt.vox_buffer.probe = lambda host: [30.0] * 100
+vt.vox_buffer.probe = lambda host, block=None: [30.0] * 100
 
 # release factice : aucun appel a GitHub pendant le test
 vt.vox_update.fetch_latest = lambda: vt.vox_update.Release(

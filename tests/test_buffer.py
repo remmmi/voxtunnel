@@ -132,5 +132,12 @@ class Probe(unittest.TestCase):
         self.assertEqual(vb.probe("inutile", duration=0.3, cmd=dead), [])
 
 
+class ProbeBlock(unittest.TestCase):
+    def test_bloc_par_codec(self):
+        # 20 ms de flux : 1920 octets en PCM s16 48 kHz, ~60 en Opus 24 kbit/s
+        self.assertEqual(vb.probe_block("pcm"), 1920)
+        self.assertEqual(vb.probe_block("opus"), 60)
+
+
 if __name__ == "__main__":
     unittest.main()

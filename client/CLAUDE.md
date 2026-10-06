@@ -15,8 +15,11 @@ repository README for the full picture.
   `voxtunnel.sh` process per active host.
 - `vox_buffer.py` — link test and automatic buffer sizing, imported by the
   tray (no Qt inside, covered by `tests/test_buffer.py`). Before a stream it
-  probes the link through `ssh <host> cat` and picks a starting buffer per
-  host; during the stream it counts the remote `aplay` underruns in the host
+  probes the link through `ssh <host> cat` at the bit rate of the chosen
+  codec (1920-byte blocks for pcm, 60 for opus: a pcm-rate probe saturates
+  a slow uplink by itself) and picks a starting buffer per host; a buffer
+  measured under one codec is dropped when the host switches codec. During
+  the stream it counts the remote `aplay` underruns in the host
   log and asks the tray to restart that stream with a larger buffer. Nothing
   is installed on the server. `python3 vox_buffer.py <host>` runs the probe
   alone and prints the recommended buffer; it never opens the microphone.
