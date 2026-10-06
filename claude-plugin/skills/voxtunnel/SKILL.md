@@ -75,6 +75,12 @@ repository, as root. It is idempotent and writes one line to the same file as th
 file in `/etc/modules-load.d/` already loads the module (earlier versions of the script wrote
 `snd-aloop.conf`).
 
+Opus, optional: with `opus-tools` on the server the stream is Opus at 24 kbit/s instead of raw PCM at
+768 (holds on slow or shared uplinks); without it the client falls back to raw PCM by itself. The
+package recommends it, so `apt install` normally pulls it. If `command -v opusdec` finds nothing, ask
+in one line ("Opus: 24 kbit/s instead of 768, costs the opus-tools package: install it?"), then
+`sudo apt install opus-tools`; if sudo wants a password, give that command to the user and stop.
+
 The SSH user that receives the stream must be allowed to open audio devices: on most distributions,
 membership of the `audio` group. Check with `id -nG <user>`; if missing, propose
 `sudo usermod -aG audio <user>` (effective at that user's next login) and change nothing else about
@@ -103,7 +109,8 @@ Server, alone:
 
 ```bash
 aplay -l | grep Loopback
-arecord -D plughw:Loopback,1,0 -f S16_LE -c1 -r48000 -d 3 /tmp/voxtunnel-test.wav   # silence is fine here
+arecord -D plughw:Loopback,0,0 -f S16_LE -c1 -r48000 -d 3 /tmp/voxtunnel-test.wav   # silence is fine here
+command -v opusdec && echo opus || echo "pcm only"                                   # see Opus in section 2
 ```
 
 Both ends, from the client (ask the user first: `--tone` sends a 5 s test tone, the plain command
@@ -124,6 +131,7 @@ VPS_HOST=user@server ./voxtunnel.sh --tone      # while the arecord above runs o
 | switch flips back to OFF in the tray | `~/.cache/voxtunnel/<host>.log` on the client | the last lines give the reason (SSH refused, `aplay` missing, device busy) |
 | recording on the server is silent | read from `default` or `plughw:Loopback,0,0` (the client writes to `Loopback,1,0`) | wrong device, or master Transmission toggle off |
 | dropouts (xruns) | buffer slider in the window; `BUFFER_US=200000 PERIOD_US=50000` for the bare engine | link jitter |
+| host row says `actif (pcm)` where Opus was expected | `command -v opusdec` on the server, `ffmpeg -encoders \| grep libopus` on the client | `opus-tools` missing on the server, or `ffmpeg` without `libopus` here; the row updates at the next stream start |
 | host missing from the tray | its `Host` block in `~/.ssh/config` | no `IdentityFile`, wildcard host, or listed in the ignore file |
 
 No automatic reconnect, by design: a dead stream turns its switch off and shows the error. Do not add
@@ -133,9 +141,12 @@ a retry loop around the engine.
 
 The application updates itself, not through this plugin: the tray checks the latest release shortly
 after launch and once a day, and installs on one explicit click (never while a stream runs); each
-host row shows the server package version and can push the server `.deb`. A server set up outside
-the package has nothing to update: the kernel module comes with the kernel. This plugin only keeps
-the skill current.
+host row shows the server package version and can push the server `.deb`; that install pulls
+`opus-tools` (recommended), and a server already up to date but without it shows an `opus ?` link
+in the row that installs it (or copies the `sudo apt-get install -y opus-tools` command when sudo
+needs a password). Updating a server by hand: run `sudo apt install opus-tools` with it, after the
+one-line question of section 2. A server set up outside the package has nothing to update: the
+kernel module comes with the kernel. This plugin only keeps the skill current.
 
 ## 7. Roll back
 

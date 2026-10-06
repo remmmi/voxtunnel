@@ -109,6 +109,8 @@ if [ "$1" = "configure" ]; then
     # Debian policy forbids interactive prompts here, so just say it:
     echo "voxtunnel-server: streaming as a non-root SSH user requires the"
     echo "voxtunnel-server: audio group:  usermod -aG audio <user>"
+    command -v opusdec >/dev/null 2>&1 \
+        || echo "voxtunnel-server: Opus (24 kbit/s instead of 768) needs:  apt install opus-tools"
 fi
 exit 0
 EOF

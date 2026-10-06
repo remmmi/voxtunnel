@@ -66,8 +66,11 @@ Client (local Linux desktop):
 | `alsa-utils`               | `arecord` capture (or `ffmpeg`) |
 | `python3`, `python3-pyqt5` | tray app                        |
 | `sox` (optional)           | `--tone` test signal            |
+| `ffmpeg` (optional)        | Opus at 24 kbit/s instead of raw PCM at 768 (with `opus-tools` on the server; raw PCM otherwise) |
 
-Server (VPS): `alsa-utils` and the `snd-aloop` kernel module. SSH key
+Server (VPS): `alsa-utils` and the `snd-aloop` kernel module; `opus-tools`
+(recommended by the package, asked by the script) to receive Opus at
+24 kbit/s instead of raw PCM at 768, which holds on slow uplinks. SSH key
 authentication is required (`BatchMode=yes`, no password prompts).
 
 ### Install

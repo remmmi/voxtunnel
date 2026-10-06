@@ -519,7 +519,7 @@ class HostRow(QWidget):
         self.server.setStyleSheet("font-size: 10px; color: %s;" % GRAY)
         self.server.setTextInteractionFlags(
             Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
-        self.server.linkActivated.connect(lambda _href: server_cb(host))
+        self.server.linkActivated.connect(lambda href: server_cb(host, href))
         layout.addWidget(self.server)
         self.switch.toggled.connect(lambda on: toggle_cb(host, on))
 
@@ -963,16 +963,55 @@ class VoiceTrayApp:
         if not row or host in self.updating:
             return
         version = self.server_versions.get(host)
+        opus = self.host_opus.get(host, True)
+        row.server.setToolTip(
+            "" if opus else
+            "Flux pcm (768 kbit/s) : opus-tools absent sur le serveur.\n"
+            "Opus = 24 kbit/s, tient sur un lien lent ; coute le paquet "
+            "opus-tools.")
         if not version:
             row.server.setText("srv hors paquet")
         elif self._server_update(host):
             row.server.setText(
                 'srv %s - <a href="#server" style="color: %s;">passer en %s</a>'
                 % (version, GREEN, self.release.version))
+            if not opus:
+                row.server.setToolTip("La mise à jour installe aussi "
+                                      "opus-tools (Opus 24 kbit/s au lieu "
+                                      "de 768).")
+        elif not opus:
+            # serveur a jour mais sans decodeur : un clic l'installe
+            row.server.setText(
+                'srv %s - <a href="#opus" style="color: %s;">opus ?</a>'
+                % (version, ORANGE))
         else:
             row.server.setText("srv " + version)
 
-    def update_server(self, host):
+    def install_opus(self, host):
+        """Installe opus-tools sur un serveur deja a jour (lien "opus ?")."""
+        row = self.window.rows.get(host)
+        if not row or host in self.updating:
+            return
+        self.updating.add(host)
+        row.server.setText("srv : installation d'opus-tools...")
+
+        def job():
+            try:
+                run = subprocess.run(
+                    vox_update.server_opus_cmd(host),
+                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
+                self.update_results.put(
+                    ("server", host, run.returncode == 0,
+                     vox_update.server_opus_manual_cmd()))
+            except OSError as e:
+                self.update_results.put(("server", host, False, str(e)))
+
+        threading.Thread(target=job, daemon=True).start()
+
+    def update_server(self, host, href="#server"):
+        if href == "#opus":
+            self.install_opus(host)
+            return
         rel = self._server_update(host)
         row = self.window.rows.get(host)
         if not rel or not row or host in self.updating:

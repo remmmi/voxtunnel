@@ -28,6 +28,9 @@ if [ -n "$MISSING" ]; then
     exit 1
   fi
 fi
+# ffmpeg is optional: without it the stream is raw PCM (768 kbit/s)
+command -v ffmpeg >/dev/null \
+  || echo "note: Opus (24 kbit/s instead of 768) needs ffmpeg here and opus-tools on the server: sudo apt-get install ffmpeg"
 
 chmod +x "$DIR/voxtunnel-tray.py" "$DIR/voxtunnel.sh"
 

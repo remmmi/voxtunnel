@@ -29,6 +29,29 @@ else
   say "no known package manager; install alsa-utils manually"; exit 1
 fi
 
+# --- opus-tools (opusdec), optional (Y/n) -------------------------------------
+# With it the client sends Opus at 24 kbit/s instead of raw PCM at 768;
+# without it the client falls back to raw PCM by itself.
+if command -v opusdec >/dev/null 2>&1; then
+  say "opus-tools: already installed (Opus 24 kbit/s)"
+else
+  if command -v apt-get >/dev/null 2>&1; then OPUS_CMD="apt-get install -y opus-tools"
+  elif command -v dnf >/dev/null 2>&1; then OPUS_CMD="dnf install -y opus-tools"
+  elif command -v pacman >/dev/null 2>&1; then OPUS_CMD="pacman -S --noconfirm --needed opus-tools"
+  else OPUS_CMD=""; fi
+  if [ -n "$OPUS_CMD" ] && [ -t 0 ]; then
+    printf 'Opus: 24 kbit/s instead of 768 (holds on slow uplinks), costs the opus-tools package. Install it? [Y/n] '
+    read -r a
+    case "$a" in
+      n|N|no|non) say "opus-tools skipped: raw PCM only. Later: $OPUS_CMD" ;;
+      *) DEBIAN_FRONTEND=noninteractive $OPUS_CMD && say "opus-tools: installed" \
+           || say "opus-tools: install failed, raw PCM only" ;;
+    esac
+  else
+    say "note: for Opus (24 kbit/s instead of 768), run: ${OPUS_CMD:-install opus-tools}"
+  fi
+fi
+
 # --- snd-aloop module ---------------------------------------------------------
 if lsmod | grep -q '^snd_aloop'; then
   say "snd-aloop: already loaded"

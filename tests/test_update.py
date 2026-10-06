@@ -117,6 +117,11 @@ class Commands(unittest.TestCase):
 
     def test_install_serveur_sans_mot_de_passe(self):
         cmd = vu.server_install_cmd("hote", "voxtunnel-server_1.3.0_all.deb")
+        opus = vu.server_opus_cmd("hote")
+        self.assertEqual(opus[0], "ssh")
+        self.assertIn("sudo -n apt-get install -y opus-tools", opus[-1])
+        self.assertEqual(vu.server_opus_manual_cmd(),
+                         "sudo apt-get install -y opus-tools")
         self.assertEqual(cmd[:3], ["ssh", "-o", "BatchMode=yes"])
         self.assertIn("hote", cmd)
         self.assertIn("sudo -n apt-get install -y "

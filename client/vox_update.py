@@ -174,6 +174,19 @@ def server_manual_cmd(deb_name):
     return "sudo apt-get install -y /tmp/" + deb_name
 
 
+# Serveur deja a jour mais sans opus-tools (paquet installe avant que le
+# Recommends existe, ou apt sans recommends) : meme mecanique que la mise a
+# jour, sudo -n puis commande a coller.
+def server_opus_cmd(host):
+    return (["ssh"] + SSH_OPTS + [host,
+            'if [ "$(id -u)" = 0 ]; then apt-get install -y opus-tools; '
+            "else sudo -n apt-get install -y opus-tools; fi"])
+
+
+def server_opus_manual_cmd():
+    return "sudo apt-get install -y opus-tools"
+
+
 def parse_listen(out):
     """Sortie de la sonde d'ecoute -> (pret, capture ouverte, version du
     paquet voxtunnel-server ou '' s'il n'est pas installe, decodeur opus
