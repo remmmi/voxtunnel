@@ -127,6 +127,11 @@ VPS_HOST=user@my-vps ./voxtunnel.sh --tone    # 1 kHz test tone
 
 Dropouts (xruns)? Raise the buffers: `BUFFER_US=200000 PERIOD_US=50000`.
 
+Silent after updating the client? Clients before 1.4 wrote to
+`plughw:Loopback,0,0`, so recorders had to read `1,0`; the voice now
+comes out on `0,0`, the server's `default` device. A recorder set to
+`1,0` by hand must move to `0,0` or `default`.
+
 ### Debian packages, versioning, safety
 
 `./build-deb.sh` builds `voxtunnel_<version>_all.deb` (client) and
@@ -232,6 +237,11 @@ VPS_HOST=user@mon-vps ./voxtunnel.sh --tone    # ton de test 1 kHz
 
 Micro-coupures (xruns) ? Remontez les tampons :
 `BUFFER_US=200000 PERIOD_US=50000`.
+
+Silence apres mise a jour du client ? Avant la 1.4 le client ecrivait sur
+`plughw:Loopback,0,0` et l'enregistreur devait lire `1,0` ; la voix sort
+maintenant sur `0,0`, le peripherique `default` du serveur. Un enregistreur
+regle a la main sur `1,0` doit passer sur `0,0` ou `default`.
 
 ### Paquets, versions, securite
 
