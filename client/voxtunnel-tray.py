@@ -47,7 +47,7 @@ from PyQt5.QtCore import (
 from PyQt5.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QCheckBox, QFrame, QHBoxLayout, QLabel, QMenu, QSlider,
-    QSystemTrayIcon, QVBoxLayout, QWidget,
+    QSystemTrayIcon, QToolButton, QVBoxLayout, QWidget,
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -494,12 +494,24 @@ class HostRow(QWidget):
         self.switch = ToggleSwitch()
         self.status = QLabel("inactif")
         self.status.setStyleSheet("color: %s;" % GRAY)
+        # erreurs copiables : selection a la souris, clic droit > Copier
+        self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self.name)
         layout.addWidget(self.switch)
         layout.addWidget(self.status, 1)
+        # visible seulement sur une erreur
+        self.copy = QToolButton()
+        self.copy.setText("copier")
+        self.copy.setToolTip("Copier le message d'erreur")
+        self.copy.clicked.connect(
+            lambda: QApplication.clipboard().setText(self.status.text()))
+        self.copy.hide()
+        layout.addWidget(self.copy)
         # version du paquet serveur, avec un lien quand une release la depasse
         self.server = QLabel()
         self.server.setStyleSheet("font-size: 10px; color: %s;" % GRAY)
+        self.server.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
         self.server.linkActivated.connect(lambda _href: server_cb(host))
         layout.addWidget(self.server)
         self.switch.toggled.connect(lambda on: toggle_cb(host, on))
@@ -512,6 +524,7 @@ class HostRow(QWidget):
     def set_status(self, text, color):
         self.status.setText(text)
         self.status.setStyleSheet("color: %s;" % color)
+        self.copy.setVisible(color == RED)
 
 
 class MainWindow(QWidget):
