@@ -1,6 +1,6 @@
 {
   "name": "voxtunnel",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Voxtunnel for Claude Code: a skill to install, verify, diagnose and roll back either side (server loopback card, client tray app) without breaking the machine's audio.",
   "author": { "name": "remmmi" },
   "homepage": "https://github.com/remmmi/voxtunnel",

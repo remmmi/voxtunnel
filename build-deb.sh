@@ -22,8 +22,9 @@ mkdir -p "$ROOT/DEBIAN" \
          "$ROOT/usr/share/icons/hicolor/scalable/apps" \
          "$ROOT/usr/share/doc/voxtunnel"
 
+# vox_*.py: every module the tray imports (a missing one breaks 1.4.0 at launch)
 install -m 755 "$DIR/client/voxtunnel.sh" "$DIR/client/voxtunnel-tray.py" \
-        "$DIR/client/vox_buffer.py" "$DIR/client/vox_update.py" \
+        "$DIR/client/"vox_*.py \
         "$ROOT/usr/share/voxtunnel/"
 install -m 644 "$DIR/client/icons/"*.svg "$ROOT/usr/share/voxtunnel/icons/"
 install -m 644 "$DIR/client/icons/voxtunnel-on.svg" \

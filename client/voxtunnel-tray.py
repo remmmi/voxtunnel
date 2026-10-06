@@ -32,7 +32,7 @@ import tempfile
 import threading
 import time
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 
 # Linux est la plateforme de reference (testee sur du vrai materiel).
 # macOS et Windows sont EXPERIMENTAUX : valides uniquement en CI,
