@@ -19,6 +19,22 @@ class Choose(unittest.TestCase):
         self.assertEqual(vc.choose(server_opus=True, local_opus=False), "pcm")
 
 
+class Sink(unittest.TestCase):
+    def test_face_opposee_a_la_capture_de_default(self):
+        # default capture sur le device 0 : on joue sur le 1, et inversement
+        self.assertEqual(vc.sink_for("C0"), "plughw:Loopback,1,0")
+        self.assertEqual(vc.sink_for("C1"), "plughw:Loopback,0,0")
+
+    def test_inconnu_garde_la_face_par_defaut(self):
+        self.assertEqual(vc.sink_for(""), vc.SINK)
+        self.assertEqual(vc.sink_for("C?"), vc.SINK)
+
+    def test_sonde_ouvre_default_et_lit_proc(self):
+        cmd = vc.sink_probe_cmd()
+        self.assertIn("arecord -D default", cmd)
+        self.assertIn("/proc/asound/Loopback/pcm", cmd)
+
+
 class Commands(unittest.TestCase):
     def test_encodeur_sans_tampon_et_bloc_d_une_periode(self):
         cmd = vc.encode_cmd(48000, 20000)
@@ -44,6 +60,9 @@ class Commands(unittest.TestCase):
         self.assertNotIn("opusdec", cmd)
 
     def test_commande_distante_opus(self):
+        cmd = vc.remote_cmd("opus", 48000, 80000, 20000,
+                            sink="plughw:Loopback,0,0")
+        self.assertIn("| aplay -D plughw:Loopback,0,0 ", cmd)
         cmd = vc.remote_cmd("opus", 48000, 80000, 20000)
         self.assertTrue(cmd.startswith("opusdec "))
         self.assertIn("--rate 48000", cmd)

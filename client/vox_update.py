@@ -190,17 +190,20 @@ def server_opus_manual_cmd():
 def parse_listen(out):
     """Sortie de la sonde d'ecoute -> (pret, capture ouverte, version du
     paquet voxtunnel-server ou '' s'il n'est pas installe, decodeur opus
-    present)."""
+    present, device de capture derriere default : C0, C1 ou '')."""
     lines = out.decode(errors="replace").split()
     state = lines[0] if lines else ""
     version = ""
     opus = False
+    capture = ""
     for line in lines[1:]:
         if line.startswith("V="):
             version = line[2:]
         elif line == "O":
             opus = True
-    return state in ("R", "RL"), state == "RL", version, opus
+        elif line in ("C0", "C1"):
+            capture = line
+    return state in ("R", "RL"), state == "RL", version, opus, capture
 
 
 def main():

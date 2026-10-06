@@ -8,6 +8,8 @@ input, ...) can record it as if a real microphone were plugged in.
 The client writes to `plughw:Loopback,1,0`; programs on the VPS record
 from `plughw:Loopback,0,0`, which is the ALSA `default` device when the
 Loopback is the only sound card, so recorders work without any setting.
+If an asoundrc points `default` at the other device, the client notices (it
+opens `default` for 0.3 s once per host) and writes to the other face.
 Clients before 1.4 wrote to `1,0`: a recorder pointed at `plughw:Loopback,1,0`
 by hand must move to `0,0` or `default`.
 

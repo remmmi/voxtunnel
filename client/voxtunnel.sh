@@ -19,6 +19,8 @@
 #              opus = Ogg Opus 24 kbit/s, trente fois moins de debit que le
 #              PCM brut ; demande ffmpeg (libopus) ici et opusdec sur le VPS,
 #              auto retombe en pcm s'il manque l'un des deux
+#   SINK       face du loopback ou ecrire   (defaut: sonde, sinon
+#              plughw:Loopback,1,0 ; les enregistreurs lisent default)
 #
 # Exemple :
 #   VPS_HOST=user@my-vps ./voxtunnel.sh
@@ -47,15 +49,20 @@ CODEC="${CODEC:-auto}"
 
 # Face playback du loopback cote VPS. Le prefixe plug: est obligatoire —
 # snd-aloop ne resample pas tout seul, et le recorder distant ne demandera
-# pas forcement la meme frequence que celle envoyee ici.
-REMOTE_SINK="plughw:Loopback,1,0"
+# pas forcement la meme frequence que celle envoyee ici. snd-aloop croise
+# ses deux devices : joue sur le 1, la voix ressort en capture sur le 0,
+# qui est `default` sauf asoundrc personnalise. Sans SINK, le preflight
+# ouvre default 0,3 s sur le VPS pour voir quel device le porte (meme
+# sonde que vox_codec.py) et ecrit sur la face opposee.
+REMOTE_SINK="${SINK:-}"
+SINK_PROBE='arecord -D default -f S16_LE -c 1 -r 48000 -t raw -d 1 -q >/dev/null 2>&1 & p=$!; sleep 0.3; d=$(grep -l "owner_pid *: *$p\$" /proc/asound/Loopback/pcm[01]c/sub*/status 2>/dev/null | head -1); kill $p 2>/dev/null; case "$d" in *pcm0c*) echo C0;; *pcm1c*) echo C1;; *) echo "C?";; esac'
 
 MODE="stream"
 case "${1:-}" in
   --check) MODE="check" ;;
   --tone)  MODE="tone" ;;
   --help|-h)
-    sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
     exit 0 ;;
   "") ;;
   *) echo "argument inconnu: $1 (voir --help)" >&2; exit 2 ;;
@@ -150,6 +157,14 @@ preflight() {
     || die "carte Loopback absente du VPS. Sur le VPS : sudo modprobe snd-aloop"
   echo "  carte Loopback     : ok"
 
+  if [ -z "$REMOTE_SINK" ]; then
+    case "$(ssh_vps "$SINK_PROBE" 2>/dev/null)" in
+      C1) REMOTE_SINK="plughw:Loopback,0,0" ;;
+      *)  REMOTE_SINK="plughw:Loopback,1,0" ;;
+    esac
+  fi
+  echo "  face loopback      : $REMOTE_SINK"
+
   case "$CODEC" in
     auto)
       CODEC=pcm
@@ -187,7 +202,7 @@ case "$MODE" in
     preflight
     echo
     echo "Sur le VPS, en parallele :"
-    echo "  arecord -D plughw:Loopback,0,0 -f S16_LE -c1 -r$RATE -d 5 /tmp/loop.wav"
+    echo "  arecord -D default -f S16_LE -c1 -r$RATE -d 5 /tmp/loop.wav"
     echo
     command -v sox >/dev/null 2>&1 \
       || die "sox absent en local (necessaire pour --tone). Utilise --check a la place."

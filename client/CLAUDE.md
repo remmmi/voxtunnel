@@ -30,6 +30,10 @@ repository README for the full picture.
   the server). The listener probe reports whether `opusdec` exists on
   each host; the tray picks `opus` only when both ends can, otherwise
   `pcm`, and shows the mode in the host row (`actif (opus) - 300 ms`).
+  It also holds the loopback face: the listener probe opens the server's
+  `default` capture for 0.3 s once per host (`sink_probe_cmd`, answer
+  `C0`/`C1`) and the client writes to the opposite face, `1,0` unless a
+  custom asoundrc moved `default`.
   `voxtunnel.sh` carries the same ffmpeg options in bash (`CODEC=auto`
   by default): change both together.
 - `vox_update.py` — update check and install, imported by the tray (no Qt

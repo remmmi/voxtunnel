@@ -129,7 +129,7 @@ VPS_HOST=user@server ./voxtunnel.sh --tone      # while the arecord above runs o
 | card gone after a reboot | `/etc/modules-load.d/` | no persistence file |
 | `aplay: audio open error: Permission denied` in the host log | `id -nG <ssh user>` | user not in the `audio` group, or not logged in again since being added |
 | switch flips back to OFF in the tray | `~/.cache/voxtunnel/<host>.log` on the client | the last lines give the reason (SSH refused, `aplay` missing, device busy) |
-| recording on the server is silent | read from `default` or `plughw:Loopback,0,0` (the client writes to `Loopback,1,0`) | wrong device, or master Transmission toggle off; a recorder set to `plughw:Loopback,1,0` by hand (the device named by clients before 1.4) must move to `0,0`/`default` |
+| recording on the server is silent | read from `default` (the client writes to the face opposite to `default`'s capture, `Loopback,1,0` unless a custom asoundrc) | wrong device, or master Transmission toggle off; a recorder set to `plughw:Loopback,1,0` by hand (the device named by clients before 1.4) must move to `0,0`/`default` |
 | dropouts (xruns) | buffer slider in the window; `BUFFER_US=200000 PERIOD_US=50000` for the bare engine | link jitter |
 | host row says `actif (pcm)` where Opus was expected | `command -v opusdec` on the server, `ffmpeg -encoders \| grep libopus` on the client | `opus-tools` missing on the server, or `ffmpeg` without `libopus` here; the row updates at the next stream start |
 | host missing from the tray | its `Host` block in `~/.ssh/config` | no `IdentityFile`, wildcard host, or listed in the ignore file |

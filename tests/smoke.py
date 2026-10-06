@@ -51,7 +51,7 @@ if vt.IS_LINUX:
     vt.VOICEPIPE = engine
 else:
     vt.capture_cmd = lambda codec="pcm": SLEEPER
-    vt.ssh_play_cmd = lambda host, ms, codec="pcm": [
+    vt.ssh_play_cmd = lambda host, ms, codec="pcm", sink=None: [
         sys.executable, "-c",
         "import sys, time; sys.stdout.write(%r if %d == 40 else ''); "
         "sys.stdout.flush(); time.sleep(60)" % (UNDERRUNS, ms)]

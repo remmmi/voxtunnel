@@ -18,7 +18,14 @@ import subprocess
 
 OPUS_KBPS = 24
 FRAME_MS = 20
+
+# Face du loopback ou le client ecrit. snd-aloop croise ses deux devices :
+# ce qui est joue sur le 1 ressort en capture sur le 0, et inversement. Les
+# enregistreurs lisent `default`, qui est la capture du device 0 sauf
+# asoundrc personnalise : on joue donc sur le 1, ou sur la face opposee a
+# celle que la sonde ci-dessous a vue derriere `default`.
 SINK = "plughw:Loopback,1,0"
+SINKS = {"C0": "plughw:Loopback,1,0", "C1": "plughw:Loopback,0,0"}
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -45,6 +52,23 @@ def have_local_opus():
             except (OSError, subprocess.SubprocessError):
                 pass
     return _local_opus
+
+
+def sink_probe_cmd():
+    """Commande shell cote serveur : ouvre `default` en capture 0,3 s et
+    dit quel device du loopback le porte (C0 ou C1), sans rien jouer.
+    C? quand default n'est pas le loopback ou qu'il est occupe."""
+    return ("arecord -D default -f S16_LE -c 1 -r 48000 -t raw -d 1 -q "
+            ">/dev/null 2>&1 & p=$!; sleep 0.3; "
+            "d=$(grep -l \"owner_pid *: *$p\\$\" "
+            "/proc/asound/Loopback/pcm[01]c/sub*/status 2>/dev/null | head -1); "
+            "kill $p 2>/dev/null; "
+            "case \"$d\" in *pcm0c*) echo C0;; *pcm1c*) echo C1;; *) echo 'C?';; esac")
+
+
+def sink_for(capture):
+    """Face ou jouer d'apres la reponse de la sonde ('' ou C? = defaut)."""
+    return SINKS.get(capture, SINK)
 
 
 def opus_output_args(rate):
