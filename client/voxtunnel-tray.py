@@ -84,12 +84,12 @@ UPDATE_EVERY_MS = 24 * 3600 * 1000
 INSTANCE_LOCK = None
 
 # Etat de l'ecoute cote VPS. R = pret (carte Loopback en place),
-# RL = pret et une capture est ouverte en ce moment (un substream pcm1c
+# RL = pret et une capture est ouverte en ce moment (un substream pcm0c
 # non "closed"), N = pas de Loopback. Host injoignable = ssh en erreur.
 # Une seconde ligne V=<version> suit quand le paquet voxtunnel-server est
 # installe (voir vox_update.parse_listen).
 LISTEN_CMD = ("if [ -d /proc/asound/Loopback ]; then "
-              "grep -L closed /proc/asound/Loopback/pcm1c/sub*/status "
+              "grep -L closed /proc/asound/Loopback/pcm0c/sub*/status "
               "2>/dev/null | grep -q . && echo RL || echo R; "
               "else echo N; fi; "
               "dpkg-query -W -f='V=${Version}\\n' voxtunnel-server "
@@ -350,7 +350,7 @@ class StreamManager(QObject):
 
 class ListenerChecker(QObject):
     """Verifie periodiquement en SSH si une ecoute est ouverte sur le
-    loopback de chaque host (un process qui enregistre Loopback,1,0).
+    loopback de chaque host (un process qui enregistre Loopback,0,0).
     Tout est non bloquant : un ssh par host, ramasse par un timer."""
 
     # host, pret, capture ouverte, version du paquet serveur ('' = aucun)
@@ -1093,7 +1093,7 @@ def reap_orphans():
     la console ou restent visibles dans le gestionnaire de taches."""
     if os.name != "posix":
         return
-    for pattern in ("voxtunnel.sh", "plughw:Loopback,0,0"):
+    for pattern in ("voxtunnel.sh", "plughw:Loopback,1,0"):
         try:
             out = subprocess.run(["pgrep", "-f", pattern],
                                  capture_output=True, text=True).stdout

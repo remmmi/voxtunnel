@@ -13,7 +13,7 @@ description: >
 ```
 local machine (client)             server (VPS)
 mic -> arecord ---- ssh (raw PCM) ---> aplay -> snd-aloop loopback
-                                                  ^ recorders read plughw:Loopback,1,0
+                                                  ^ recorders read default (plughw:Loopback,0,0)
 ```
 
 Two sides, two packages, one repository: https://github.com/remmmi/voxtunnel. This skill never
@@ -122,7 +122,7 @@ VPS_HOST=user@server ./voxtunnel.sh --tone      # while the arecord above runs o
 | card gone after a reboot | `/etc/modules-load.d/` | no persistence file |
 | `aplay: audio open error: Permission denied` in the host log | `id -nG <ssh user>` | user not in the `audio` group, or not logged in again since being added |
 | switch flips back to OFF in the tray | `~/.cache/voxtunnel/<host>.log` on the client | the last lines give the reason (SSH refused, `aplay` missing, device busy) |
-| recording on the server is silent | read from `plughw:Loopback,1,0` (the client writes to `Loopback,0,0`) | wrong device, or master Transmission toggle off |
+| recording on the server is silent | read from `default` or `plughw:Loopback,0,0` (the client writes to `Loopback,1,0`) | wrong device, or master Transmission toggle off |
 | dropouts (xruns) | buffer slider in the window; `BUFFER_US=200000 PERIOD_US=50000` for the bare engine | link jitter |
 | host missing from the tray | its `Host` block in `~/.ssh/config` | no `IdentityFile`, wildcard host, or listed in the ignore file |
 

@@ -90,8 +90,8 @@ Maintainer: remmmi <remmmi@users.noreply.github.com>
 Homepage: https://github.com/remmmi/voxtunnel
 Description: Receive Voxtunnel audio on a server (ALSA loopback setup)
  Server side of Voxtunnel: loads the snd-aloop kernel module now and at
- every boot, so audio streamed over SSH into plughw:Loopback,0,0 can be
- recorded locally from plughw:Loopback,1,0 like a regular microphone.
+ every boot, so audio streamed over SSH into plughw:Loopback,1,0 can be
+ recorded locally from plughw:Loopback,0,0 (the default device) like a regular microphone.
  Purely additive: no existing audio configuration is touched.
 EOF
 

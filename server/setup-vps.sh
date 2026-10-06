@@ -79,4 +79,4 @@ if [ -n "$TARGET" ] && [ "$TARGET" != "root" ] \
   fi
 fi
 
-say "done. Recording side on this VPS reads from: plughw:Loopback,1,0"
+say "done. Recording side on this VPS reads from: plughw:Loopback,0,0 (default)"

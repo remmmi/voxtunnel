@@ -43,7 +43,7 @@ PERIOD_US="${PERIOD_US:-20000}"
 # Face playback du loopback cote VPS. Le prefixe plug: est obligatoire —
 # snd-aloop ne resample pas tout seul, et le recorder distant ne demandera
 # pas forcement la meme frequence que celle envoyee ici.
-REMOTE_SINK="plughw:Loopback,0,0"
+REMOTE_SINK="plughw:Loopback,1,0"
 
 MODE="stream"
 case "${1:-}" in
@@ -122,7 +122,7 @@ case "$MODE" in
     preflight
     echo
     echo "Sur le VPS, en parallele :"
-    echo "  arecord -D plughw:Loopback,1,0 -f S16_LE -c1 -r$RATE -d 5 /tmp/loop.wav"
+    echo "  arecord -D plughw:Loopback,0,0 -f S16_LE -c1 -r$RATE -d 5 /tmp/loop.wav"
     echo
     command -v sox >/dev/null 2>&1 \
       || die "sox absent en local (necessaire pour --tone). Utilise --check a la place."

@@ -5,8 +5,9 @@ audio over SSH and plays it into an ALSA loopback card (`snd-aloop`), where
 any local program (speech-to-text, a voice assistant, Claude Code voice
 input, ...) can record it as if a real microphone were plugged in.
 
-The client writes to `plughw:Loopback,0,0`; programs on the VPS record
-from `plughw:Loopback,1,0`.
+The client writes to `plughw:Loopback,1,0`; programs on the VPS record
+from `plughw:Loopback,0,0`, which is the ALSA `default` device when the
+Loopback is the only sound card, so recorders work without any setting.
 
 ## Installing WITHOUT breaking the VPS
 
@@ -38,7 +39,7 @@ these rules strictly:
 
 ```
 aplay -l | grep Loopback                       # card is visible
-arecord -D plughw:Loopback,1,0 -f S16_LE -c1 -r48000 -d 3 /tmp/test.wav
+arecord -D plughw:Loopback,0,0 -f S16_LE -c1 -r48000 -d 3 /tmp/test.wav
 ```
 
 Then from the client: `VPS_HOST=user@this-vps ./voxtunnel.sh --check`

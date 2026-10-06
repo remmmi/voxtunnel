@@ -38,7 +38,7 @@ local machine                      server (VPS)
 mic -> arecord ---- ssh (raw PCM) ---> aplay -> snd-aloop loopback
                                                   ^
                                        any recorder reads it as a mic
-                                       (plughw:Loopback,1,0)
+                                       (default, or plughw:Loopback,0,0)
 ```
 
 ### Platforms
