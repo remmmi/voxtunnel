@@ -48,7 +48,7 @@ repository README for the full picture.
   inside, covered by `tests/test_update.py`). The latest GitHub release of
   the repository is the reference: the tray queries it shortly after launch
   and every hour, announces a newer version in the window footer and the
-  tray menu, and on click downloads the client `.deb`, checks its SHA-256
+  tray menu (the footer reads `v<version> à jour` otherwise), and on click downloads the client `.deb`, checks its SHA-256
   against the release metadata and installs it through `pkexec apt-get`
   (Debian package installs only; any other install opens the release page).
   It never installs while a stream is running. Each host row also shows the

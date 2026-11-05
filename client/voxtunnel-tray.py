@@ -886,8 +886,16 @@ class VoiceTrayApp:
         return None
 
     def _refresh_client_ui(self):
+        if self.installed or "client" in self.updating:
+            return
         rel = self._client_update()
-        if not rel or self.installed or "client" in self.updating:
+        if not rel:
+            # GitHub a repondu et rien n'est plus recent : la zone le dit
+            if self.release:
+                self.window.set_update(
+                    '<span style="color: %s;">v%s à jour</span>'
+                    % (GRAY, __version__))
+                self.update_action.setVisible(False)
             return
         one_click = (vox_update.is_deb_install(SCRIPT_DIR)
                      and "voxtunnel" in rel.assets)
