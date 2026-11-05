@@ -107,6 +107,22 @@ def up_to_date():
 
 
 QTimer.singleShot(6900, up_to_date)
+
+
+def menu_check():
+    # clic droit : verifie, puis plus avant une minute
+    calls = []
+    real = vt.vox_update.fetch_latest
+    vt.vox_update.fetch_latest = lambda: calls.append(1)
+    ui.update_checked = None
+    ui.menu.aboutToShow.emit()
+    ui.menu.aboutToShow.emit()
+    QTimer.singleShot(200, lambda: (
+        check("clic droit verifie la version", len(calls) == 1),
+        setattr(vt.vox_update, "fetch_latest", real)))
+
+
+QTimer.singleShot(6950, menu_check)
 QTimer.singleShot(7000, lambda: ui.window.master_switch.setChecked(False))
 QTimer.singleShot(10000, lambda: check("coupure: plus de stream", not ui.manager.procs))
 QTimer.singleShot(10100, lambda: check(
@@ -123,7 +139,7 @@ app.exec_()
 for name, ok in results:
     print("%-30s %s" % (name, "ok" if ok else "ECHEC"))
 failed = [n for n, ok in results if not ok]
-if failed or len(results) != 10:
+if failed or len(results) != 11:
     print("SMOKE FAILED:", failed or "resultats incomplets")
     sys.exit(1)
 print("SMOKE OK (%s)" % sys.platform)

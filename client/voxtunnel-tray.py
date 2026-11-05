@@ -83,6 +83,9 @@ PROBE_TTL_S = 600
 # verification des mises a jour : peu apres le lancement, puis toutes les heures
 UPDATE_FIRST_MS = 3000
 UPDATE_EVERY_MS = 3600 * 1000
+# le clic droit sur l'icone verifie aussi, au plus une fois par minute :
+# l'API GitHub sans jeton accepte 60 requetes par heure
+UPDATE_MENU_MIN_S = 60
 
 # verrou d'instance unique, relache avant de relancer l'app apres une
 # mise a jour
@@ -714,6 +717,7 @@ class VoiceTrayApp:
         self.updating = set()      # "client" ou host : installation en vol
         self.installed = False     # client mis a jour, relance attendue
         self.update_results = queue.Queue()
+        self.update_checked = None  # instant de la derniere verification
         self.probe_timer.timeout.connect(self._collect_updates)
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._check_update)
@@ -751,6 +755,7 @@ class VoiceTrayApp:
         self.update_action.setVisible(False)
         self.menu.addAction("Ouvrir la fenêtre", self._show_window)
         self.menu.addAction("Quitter", self._quit)
+        self.menu.aboutToShow.connect(self._check_update_from_menu)
         self.tray.setContextMenu(self.menu)
         self.tray.activated.connect(self._on_tray_activated)
         self.tray.show()
@@ -900,7 +905,13 @@ class VoiceTrayApp:
 
     # --- mises a jour --------------------------------------------------------
 
+    def _check_update_from_menu(self):
+        if (self.update_checked is None
+                or time.monotonic() - self.update_checked >= UPDATE_MENU_MIN_S):
+            self._check_update()
+
     def _check_update(self):
+        self.update_checked = time.monotonic()
         threading.Thread(
             target=lambda: self.update_results.put(
                 ("release", vox_update.fetch_latest())),
