@@ -51,7 +51,10 @@ repository README for the full picture.
   tray menu (the footer reads `v<version> à jour` otherwise), and on click downloads the client `.deb`, checks its SHA-256
   against the release metadata and installs it through `pkexec apt-get`
   (Debian package installs only; any other install opens the release page).
-  It never installs while a stream is running. Each host row also shows the
+  After a successful install the tray relaunches itself: the switches that
+  were ON and the Transmission state go to `~/.config/voxtunnel/resume.json`,
+  which the next instance reads, deletes and applies. Running streams need
+  not be stopped first: dpkg replaces files by rename. Each host row also shows the
   `voxtunnel-server` package version read over the existing listener probe;
   a click pushes the server `.deb` by `scp` and installs it with `sudo -n`,
   falling back to a command to paste when sudo needs a password.
@@ -81,7 +84,8 @@ ALSA/PulseAudio/PipeWire stack.
    (`~/.local/share/applications`). `./install.sh --autostart` also copies
    it to `~/.config/autostart`. Nothing else is written outside
    `~/.cache/voxtunnel/` (logs) and `~/.config/voxtunnel/` (optional
-   `ignore` file).
+   `ignore` file, `resume.json` for the few seconds of a post-update
+   relaunch).
 3. Run `python3 voxtunnel-tray.py` (or the menu entry). A second launch exits
    immediately (single-instance lock in /tmp).
 

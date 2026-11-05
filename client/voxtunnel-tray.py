@@ -22,6 +22,7 @@
 # Pas de relance automatique : un stream mort repasse son interrupteur a OFF
 # et affiche l'erreur.
 
+import json
 import os
 import queue
 import re
@@ -61,6 +62,9 @@ ICON_DIR = os.path.join(SCRIPT_DIR, "icons")
 LOG_DIR = os.path.join(os.path.expanduser("~"), ".cache", "voxtunnel")
 IGNORE_FILE = os.path.join(os.path.expanduser("~"), ".config", "voxtunnel", "ignore")
 DEFAULT_IGNORE = {"github.com"}
+# interrupteurs a remettre au demarrage qui suit une mise a jour : ecrit
+# juste avant la relance, lu puis efface par l'instance suivante
+RESUME_FILE = os.path.join(os.path.expanduser("~"), ".config", "voxtunnel", "resume.json")
 
 OFF, STARTING, ON, ERROR = "off", "starting", "on", "error"
 
@@ -157,6 +161,33 @@ def ssh_play_cmd(host, buffer_ms, codec="pcm", sink=vox_codec.SINK):
             "-o", "Compression=no", "-o", "IPQoS=lowdelay", host,
             vox_codec.remote_cmd(codec, 48000, buffer_ms * 1000,
                                  vox_buffer.period_us(buffer_ms), sink)]
+
+
+def save_resume(hosts, transmitting, path=None):
+    """Note les interrupteurs ON et l'etat de Transmission avant relance."""
+    path = path or RESUME_FILE
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump({"hosts": sorted(hosts), "transmitting": bool(transmitting)}, f)
+
+
+def take_resume(path=None):
+    """Etat note par save_resume, efface a la lecture ; None sans fichier."""
+    path = path or RESUME_FILE
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    if not isinstance(data, dict):
+        return None
+    return ([h for h in data.get("hosts", []) if isinstance(h, str)],
+            bool(data.get("transmitting", True)))
 
 
 def discover_hosts():
@@ -727,6 +758,20 @@ class VoiceTrayApp:
         self.manager.state_changed.connect(self._on_state_changed)
         self.manager.buffer_wanted.connect(self._on_buffer_wanted)
         self._update_tray()
+        QTimer.singleShot(0, self._resume)
+
+    def _resume(self):
+        """Remet les interrupteurs d'avant une relance de mise a jour."""
+        state = take_resume()
+        if state is None:
+            return
+        hosts, transmitting = state
+        if not transmitting:
+            self.window.master_switch.setChecked(False)
+        for host in hosts:
+            row = self.window.rows.get(host)
+            if row:
+                row.switch.setChecked(True)
 
     @staticmethod
     def _load_icon(filename):
@@ -921,12 +966,8 @@ class VoiceTrayApp:
         if not asset or not vox_update.is_deb_install(SCRIPT_DIR):
             QDesktopServices.openUrl(QUrl(rel.page_url))
             return
-        if self.manager.procs:
-            # l'installation remplace les fichiers du stream en cours
-            self.tray.showMessage(
-                "Voxtunnel", "Coupe la Transmission avant d'installer v%s."
-                % rel.version, QSystemTrayIcon.Information, 6000)
-            return
+        # pas besoin de couper les streams : dpkg remplace les fichiers par
+        # renommage, ceux en cours gardent les anciens jusqu'a la relance
         self.updating.add("client")
         self.update_action.setVisible(False)
         self.window.set_update("installation de v%s..." % rel.version)
@@ -951,20 +992,21 @@ class VoiceTrayApp:
     def _on_client_updated(self, ok, version, message):
         self.updating.discard("client")
         if ok:
+            # relance tout de suite, les interrupteurs sont notes et remis
             self.installed = True
-            self.window.set_update(
-                'v%s installée - <a href="#restart" style="color: %s;">'
-                'relancer</a>' % (version, GREEN))
-            self.update_action.setText("Relancer en v%s" % version)
-            self.update_action.triggered.disconnect()
-            self.update_action.triggered.connect(self._relaunch)
-            self.update_action.setVisible(True)
+            self.window.set_update("v%s installée - relance..." % version)
+            self.update_action.setVisible(False)
+            self._relaunch()
         else:
             self._refresh_client_ui()
             self.tray.showMessage("Voxtunnel — mise à jour", message,
                                   QSystemTrayIcon.Warning, 8000)
 
     def _relaunch(self):
+        try:
+            save_resume(self.desired, self.transmitting)
+        except OSError:
+            pass  # relance quand meme, interrupteurs a remettre a la main
         self.manager.stop_all()
 
         def restart():

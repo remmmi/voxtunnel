@@ -59,6 +59,9 @@ else:
 from PyQt5.QtCore import QTimer            # noqa: E402
 from PyQt5.QtWidgets import QApplication   # noqa: E402
 
+# relance apres mise a jour : beta etait ON, l'instance suivante le remet
+vt.save_resume({"beta"}, True)
+
 app = QApplication([])
 app.setQuitOnLastWindowClosed(False)
 ui = vt.VoiceTrayApp(app)
@@ -78,6 +81,12 @@ def check(name, ok):
     results.append((name, bool(ok)))
 
 
+QTimer.singleShot(200, lambda: check(
+    "interrupteurs repris apres relance",
+    ui.window.rows["beta"].switch.isChecked()
+    and not ui.window.rows["alpha"].switch.isChecked()
+    and not os.path.exists(vt.RESUME_FILE)))
+QTimer.singleShot(250, lambda: ui.window.rows["beta"].switch.setChecked(False))
 QTimer.singleShot(300, lambda: ui.window.rows["alpha"].switch.setChecked(True))
 QTimer.singleShot(6500, lambda: check("stream lance", "alpha" in ui.manager.procs))
 QTimer.singleShot(6600, lambda: check(
@@ -114,7 +123,7 @@ app.exec_()
 for name, ok in results:
     print("%-30s %s" % (name, "ok" if ok else "ECHEC"))
 failed = [n for n, ok in results if not ok]
-if failed or len(results) != 9:
+if failed or len(results) != 10:
     print("SMOKE FAILED:", failed or "resultats incomplets")
     sys.exit(1)
 print("SMOKE OK (%s)" % sys.platform)
