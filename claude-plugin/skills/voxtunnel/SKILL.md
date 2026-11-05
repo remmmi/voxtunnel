@@ -142,7 +142,7 @@ a retry loop around the engine.
 ## 6. Updates
 
 The application updates itself, not through this plugin: the tray checks the latest release shortly
-after launch and once a day, and installs on one explicit click (never while a stream runs); each
+after launch and every hour, and installs on one explicit click (never while a stream runs); each
 host row shows the server package version and can push the server `.deb`; that install pulls
 `opus-tools` (recommended), and a server already up to date but without it shows an `opus ?` link
 in the row that installs it (or copies the `sudo apt-get install -y opus-tools` command when sudo

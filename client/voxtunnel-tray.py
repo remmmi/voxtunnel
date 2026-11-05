@@ -76,9 +76,9 @@ BUFFER_MAX_MS = vox_buffer.BUFFER_MAX_MS
 # de relancer un stream ; en deca le stream repart sans attendre la sonde
 PROBE_TTL_S = 600
 
-# verification des mises a jour : peu apres le lancement, puis une fois par jour
+# verification des mises a jour : peu apres le lancement, puis toutes les heures
 UPDATE_FIRST_MS = 3000
-UPDATE_EVERY_MS = 24 * 3600 * 1000
+UPDATE_EVERY_MS = 3600 * 1000
 
 # verrou d'instance unique, relache avant de relancer l'app apres une
 # mise a jour
