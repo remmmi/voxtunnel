@@ -9,6 +9,14 @@ repository README for the full picture.
 - `voxtunnel.sh` — the streaming engine (bash). One process per stream,
   configured entirely through environment variables (`VPS_HOST`, `MIC`,
   `RATE`, `BUFFER_US`, `PERIOD_US`). Run `./voxtunnel.sh --help`.
+  A loopback face takes one writer: the preflight reads its owner in
+  `/proc/asound/Loopback/pcm<D>p/sub<S>/status` on the server (`SINK_GUARD`)
+  and prints it (pid, command, user, start time, SSH client address).
+  `--check` only names it; a stream stops it and takes the face, so the
+  last stream started keeps the microphone and the previous client's
+  switch falls back to OFF. Only an `aplay` is stopped: any other owner
+  (a sound server), or another user's process, ends the preflight with
+  its name. Covered by `tests/test_engine.py` (fake `ssh`, no audio).
 - `voxtunnel-tray.py` — PyQt5 tray/window app. Discovers hosts from
   `~/.ssh/config` (Host blocks that declare an IdentityFile), shows one
   toggle per host plus a master "Transmission" toggle, and runs one

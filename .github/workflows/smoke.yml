@@ -26,6 +26,9 @@ jobs:
       - run: python tests/test_buffer.py
       - run: python tests/test_update.py
       - run: python tests/test_plugin.py
+      - name: Engine tests (Linux)
+        if: runner.os == 'Linux'
+        run: python tests/test_engine.py
       - run: python tests/smoke.py
         env:
           QT_QPA_PLATFORM: offscreen

@@ -127,6 +127,11 @@ VPS_HOST=user@my-vps ./voxtunnel.sh --tone    # 1 kHz test tone
 
 Dropouts (xruns)? Raise the buffers: `BUFFER_US=200000 PERIOD_US=50000`.
 
+Two machines, one server? A loopback face takes one stream at a time. The
+last stream started stops the previous one (its switch falls back to OFF)
+and keeps the microphone; `--check` names who holds the face (pid, start
+time, client address) without stopping anything.
+
 Silent after updating the client? Clients before 1.4 wrote to
 `plughw:Loopback,0,0`, so recorders had to read `1,0`; the voice now
 comes out on `0,0`, the server's `default` device. A recorder set to
@@ -237,6 +242,11 @@ VPS_HOST=user@mon-vps ./voxtunnel.sh --tone    # ton de test 1 kHz
 
 Micro-coupures (xruns) ? Remontez les tampons :
 `BUFFER_US=200000 PERIOD_US=50000`.
+
+Deux machines, un serveur ? Une face du loopback ne prend qu'un flux a la
+fois. Le dernier flux lance arrete le precedent (son interrupteur retombe
+sur OFF) et garde le micro ; `--check` nomme qui tient la face (pid, heure
+de depart, adresse du client) sans rien arreter.
 
 Silence apres mise a jour du client ? Avant la 1.4 le client ecrivait sur
 `plughw:Loopback,0,0` et l'enregistreur devait lire `1,0` ; la voix sort

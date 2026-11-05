@@ -28,6 +28,10 @@
 # Si tu entends des micro-coupures (xruns), remonte les tampons :
 #   BUFFER_US=200000 PERIOD_US=50000 VPS_HOST=... ./voxtunnel.sh
 #
+# Un seul flux par face du loopback : le preflight lit qui la tient (pid,
+# depart, adresse du client SSH) ; --check le nomme, un stream l'arrete et
+# prend la face. Le dernier flux lance garde le micro.
+#
 # Pas de relance automatique : si le pipe meurt, tu relances a la main.
 # Une boucle de retry sans garde TTY dans un fichier de demarrage shell
 # fabrique des shells orphelins qui respawnent en boucle.
@@ -57,12 +61,38 @@ CODEC="${CODEC:-auto}"
 REMOTE_SINK="${SINK:-}"
 SINK_PROBE='arecord -D default -f S16_LE -c 1 -r 48000 -t raw -d 1 -q >/dev/null 2>&1 & p=$!; sleep 0.3; d=$(grep -l "owner_pid *: *$p\$" /proc/asound/Loopback/pcm[01]c/sub*/status 2>/dev/null | head -1); kill $p 2>/dev/null; case "$d" in *pcm0c*) echo C0;; *pcm1c*) echo C1;; *) echo "C?";; esac'
 
+# Occupation de la face. snd-aloop n'accepte qu'un ecrivain par substream :
+# tant qu'un autre flux la tient, aplay echoue en "Device or resource busy".
+# Le noyau donne le proprietaire dans /proc/asound/Loopback/pcm<D>p/sub<S>/
+# status (closed, ou owner_pid). Le preflight y lit le pid, dit qui c'est
+# (commande, utilisateur, heure de depart, adresse du client SSH), et hors
+# --check l'arrete pour prendre la face : le dernier flux lance garde le
+# micro. Seul un aplay est arrete, c'est ce que lance tout client
+# Voxtunnel ; un serveur de son qui tiendrait la face n'est pas touche.
+# Variables attendues cote VPS : f = fichier status, k = 1 pour arreter.
+SINK_GUARD='[ -r "$f" ] || exit 0
+p=$(sed -n "s/^owner_pid *: *//p" "$f")
+[ -n "$p" ] || { echo free; exit 0; }
+c=$(ps -o comm= -p "$p" 2>/dev/null)
+ip=$(tr "\0" "\n" 2>/dev/null <"/proc/$p/environ" | sed -n "s/^SSH_CONNECTION=\([^ ]*\).*/\1/p")
+echo "busy pid $p ($c, $(ps -o user= -p "$p" 2>/dev/null)), depuis $(ps -o lstart= -p "$p" 2>/dev/null)${ip:+, venu de $ip}"
+[ "$k" = 1 ] || exit 0
+[ "$c" = aplay ] || { echo foreign; exit 0; }
+kill "$p" 2>/dev/null || { echo denied; exit 0; }
+i=0
+while [ $i -lt 30 ]; do
+  grep -q "^owner_pid *: *$p\$" "$f" 2>/dev/null || { echo freed; exit 0; }
+  [ $i -eq 20 ] && kill -9 "$p" 2>/dev/null
+  sleep 0.1; i=$((i+1))
+done
+echo stuck'
+
 MODE="stream"
 case "${1:-}" in
   --check) MODE="check" ;;
   --tone)  MODE="tone" ;;
   --help|-h)
-    sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'
     exit 0 ;;
   "") ;;
   *) echo "argument inconnu: $1 (voir --help)" >&2; exit 2 ;;
@@ -141,6 +171,25 @@ send() {
   fi
 }
 
+# --- Occupation de la face ---------------------------------------------------
+# Sans effet quand SINK ne nomme pas un substream du loopback (D,S).
+free_sink() {
+  [[ "$REMOTE_SINK" =~ Loopback,([0-9]+),([0-9]+)$ ]] || return 0
+  local take=1 out who
+  [ "$MODE" = check ] && take=0
+  out=$(ssh_vps "f=/proc/asound/Loopback/pcm${BASH_REMATCH[1]}p/sub${BASH_REMATCH[2]}/status; k=$take; $SINK_GUARD" 2>/dev/null) || true
+  who=$(sed -n '1s/^busy //p' <<<"$out")
+  case "$(tail -n 1 <<<"$out")" in
+    free)    echo "  occupation         : libre" ;;
+    freed)   echo "  occupation         : $who -> arrete, face libre" ;;
+    busy*)   echo "  occupation         : $who"
+             echo "  (un stream arretera ce processus pour prendre la face)" ;;
+    foreign) die "face $REMOTE_SINK tenue par $who : ce n'est pas un aplay, je n'y touche pas." ;;
+    denied)  die "face $REMOTE_SINK tenue par $who : arret refuse (autre utilisateur). Sur le VPS : sudo kill ${who#pid }" ;;
+    stuck)   die "face $REMOTE_SINK tenue par $who : toujours occupee 3 s apres l'arret." ;;
+  esac
+}
+
 # --- Preflight --------------------------------------------------------------
 preflight() {
   echo "  enregistreur local : $RECORDER   (micro: $MIC, ${RATE} Hz)"
@@ -164,6 +213,7 @@ preflight() {
     esac
   fi
   echo "  face loopback      : $REMOTE_SINK"
+  free_sink
 
   case "$CODEC" in
     auto)
