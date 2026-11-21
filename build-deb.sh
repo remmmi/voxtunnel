@@ -49,6 +49,7 @@ Priority: optional
 Architecture: all
 Depends: python3, python3-pyqt5, alsa-utils, openssh-client
 Recommends: ffmpeg, sox
+Suggests: adb
 Conflicts: voicepipe
 Replaces: voicepipe
 Maintainer: remmmi <remmmi@users.noreply.github.com>
@@ -88,6 +89,7 @@ Priority: optional
 Architecture: all
 Depends: alsa-utils, kmod
 Recommends: opus-tools
+Suggests: adb
 Conflicts: voicepipe-server
 Replaces: voicepipe-server
 Maintainer: remmmi <remmmi@users.noreply.github.com>

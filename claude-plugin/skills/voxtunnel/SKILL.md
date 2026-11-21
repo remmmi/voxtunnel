@@ -139,6 +139,18 @@ VPS_HOST=user@server ./voxtunnel.sh --tone      # while the arecord above runs o
 No automatic reconnect, by design: a dead stream turns its switch off and shows the error. Do not add
 a retry loop around the engine.
 
+## adb tunnel (optional)
+
+Each host row of the tray has an `adb` box: ticked, the phone plugged into the client answers
+`adb devices`, `adb shell`... on the server, on its local port 5037 (an `ssh -R` to the client's adb
+server, on its own SSH connection, independent of the voice switch). It needs the `adb` package on
+both ends with the same first line of `adb version`; the tray refuses the tunnel otherwise and
+copies `sudo apt-get install -y adb` when the server lacks it. Ask before installing it. Green box =
+the server sees a phone; orange = tunnel up without a phone, the tooltip says why (not plugged,
+USB debugging not accepted). `adb devices` empty on the server while the box is off is normal: that
+is a local adb server, stopped by the tray at the next connection. Without the GUI:
+`python3 vox_adb.py <host>` on the client. Log: `~/.cache/voxtunnel/<host>.adb.log`.
+
 ## 6. Updates
 
 The application updates itself, not through this plugin: the tray checks the latest release shortly

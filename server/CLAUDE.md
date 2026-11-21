@@ -44,6 +44,13 @@ these rules strictly:
 24 kbit/s and the server runs `opusdec | aplay`; without it the client falls
 back to raw PCM (768 kbit/s) on its own. Nothing else differs.
 
+`adb` is optional: with it, the `adb` box of the client tray makes the
+phone plugged into the client answer `adb devices`, `adb shell`... here, on
+`127.0.0.1:5037` (an SSH reverse forward, no adb server runs on the VPS).
+Same adb protocol version as the client (`adb version`, first line), or the
+tray refuses the tunnel. Any local user of the VPS can reach that port
+while the box is ticked.
+
 ## Verify
 
 ```

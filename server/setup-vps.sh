@@ -52,6 +52,12 @@ else
   fi
 fi
 
+# --- adb, optional -------------------------------------------------------------
+# Only for the adb tunnel of the tray (a phone plugged into the client,
+# driven from here). Never installed by this script: one line to paste.
+command -v adb >/dev/null 2>&1 && say "adb: already installed (adb tunnel ready)" \
+  || say "note: for the adb tunnel (phone on the client driven from here), install the adb package"
+
 # --- snd-aloop module ---------------------------------------------------------
 if lsmod | grep -q '^snd_aloop'; then
   say "snd-aloop: already loaded"

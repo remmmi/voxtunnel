@@ -59,8 +59,18 @@ else:
 from PyQt5.QtCore import QTimer            # noqa: E402
 from PyQt5.QtWidgets import QApplication   # noqa: E402
 
-# relance apres mise a jour : beta etait ON, l'instance suivante le remet
-vt.save_resume({"beta"}, True)
+# tunnel adb factice : preflight toujours bon, un process qui annonce un
+# telephone puis dort (aucun ssh, aucun adb reel)
+vt.vox_adb.have_local = lambda: True
+vt.vox_adb.preflight = lambda host: (vt.vox_adb.OK, "")
+vt.vox_adb.tunnel_cmd = lambda host: [
+    sys.executable, "-c",
+    "import sys, time; sys.stdout.write('UP\\nD 1 0\\n'); "
+    "sys.stdout.flush(); time.sleep(60)"]
+
+# relance apres mise a jour : beta etait ON avec sa case adb, l'instance
+# suivante les remet
+vt.save_resume({"beta"}, True, adb={"beta"})
 
 app = QApplication([])
 app.setQuitOnLastWindowClosed(False)
@@ -86,7 +96,36 @@ QTimer.singleShot(200, lambda: check(
     ui.window.rows["beta"].switch.isChecked()
     and not ui.window.rows["alpha"].switch.isChecked()
     and not os.path.exists(vt.RESUME_FILE)))
+QTimer.singleShot(210, lambda: check(
+    "case adb reprise apres relance",
+    ui.window.rows["beta"].adb.isChecked() and "beta" in ui.adb.wanted))
 QTimer.singleShot(250, lambda: ui.window.rows["beta"].switch.setChecked(False))
+QTimer.singleShot(260, lambda: ui.window.rows["beta"].adb.setChecked(False))
+QTimer.singleShot(300, lambda: ui.window.rows["alpha"].adb.setChecked(True))
+
+adb_pids = []
+
+
+def adb_up():
+    proc = ui.adb.procs.get("alpha")
+    check("tunnel adb ouvert, telephone vu",
+          proc is not None and proc.poll() is None
+          and "1 téléphone" in ui.window.rows["alpha"].adb.toolTip()
+          and "beta" not in ui.adb.procs)
+    if proc:
+        # le tunnel tombe tout seul : il doit revenir sans qu'on y touche
+        adb_pids.append(proc.pid)
+        proc.kill()
+
+
+QTimer.singleShot(3500, adb_up)
+QTimer.singleShot(9000, lambda: check(
+    "tunnel adb relance seul",
+    "alpha" in ui.adb.procs and ui.adb.procs["alpha"].pid not in adb_pids
+    and ui.window.rows["alpha"].adb.isChecked()))
+QTimer.singleShot(10200, lambda: check(
+    "coupure: tunnel adb intact", "alpha" in ui.adb.procs))
+QTimer.singleShot(13000, ui.adb.stop_all)
 QTimer.singleShot(300, lambda: ui.window.rows["alpha"].switch.setChecked(True))
 QTimer.singleShot(6500, lambda: check("stream lance", "alpha" in ui.manager.procs))
 QTimer.singleShot(6600, lambda: check(
@@ -130,7 +169,9 @@ QTimer.singleShot(10100, lambda: check(
 QTimer.singleShot(10500, lambda: ui.window.master_switch.setChecked(True))
 QTimer.singleShot(12500, lambda: check("retablissement", "alpha" in ui.manager.procs))
 QTimer.singleShot(13000, ui.manager.stop_all)
-QTimer.singleShot(15500, lambda: check("arret final", not ui.manager.procs))
+QTimer.singleShot(15500, lambda: check(
+    "arret final", not ui.manager.procs and not ui.adb.procs
+    and not ui.window.rows["alpha"].adb.isChecked()))
 QTimer.singleShot(16000, app.quit)
 QTimer.singleShot(30000, lambda: sys.exit(2))  # garde-fou
 
@@ -139,7 +180,7 @@ app.exec_()
 for name, ok in results:
     print("%-30s %s" % (name, "ok" if ok else "ECHEC"))
 failed = [n for n, ok in results if not ok]
-if failed or len(results) != 11:
+if failed or len(results) != 15:
     print("SMOKE FAILED:", failed or "resultats incomplets")
     sys.exit(1)
 print("SMOKE OK (%s)" % sys.platform)

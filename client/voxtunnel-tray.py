@@ -21,6 +21,11 @@
 # l'arret envoie SIGTERM au groupe entier (arecord | ssh compris).
 # Pas de relance automatique : un stream mort repasse son interrupteur a OFF
 # et affiche l'erreur.
+#
+# A cote de la voix, une case "adb" par host ouvre un tunnel vers le serveur
+# adb d'ici (voir vox_adb.py) : connexion SSH a part, independante de
+# l'interrupteur du host et de "Transmission". Ce tunnel-la se relance seul
+# tant que sa case est cochee.
 
 import json
 import os
@@ -56,6 +61,7 @@ sys.path.insert(0, SCRIPT_DIR)
 import vox_buffer  # noqa: E402  (module voisin : sonde et tampon auto)
 import vox_update  # noqa: E402  (module voisin : mises a jour)
 import vox_codec   # noqa: E402  (module voisin : pcm ou opus)
+import vox_adb     # noqa: E402  (module voisin : tunnel adb)
 
 VOICEPIPE = os.path.join(SCRIPT_DIR, "voxtunnel.sh")
 ICON_DIR = os.path.join(SCRIPT_DIR, "icons")
@@ -166,12 +172,14 @@ def ssh_play_cmd(host, buffer_ms, codec="pcm", sink=vox_codec.SINK):
                                  vox_buffer.period_us(buffer_ms), sink)]
 
 
-def save_resume(hosts, transmitting, path=None):
-    """Note les interrupteurs ON et l'etat de Transmission avant relance."""
+def save_resume(hosts, transmitting, path=None, adb=()):
+    """Note les interrupteurs ON, l'etat de Transmission et les cases adb
+    cochees avant relance."""
     path = path or RESUME_FILE
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
-        json.dump({"hosts": sorted(hosts), "transmitting": bool(transmitting)}, f)
+        json.dump({"hosts": sorted(hosts), "transmitting": bool(transmitting),
+                   "adb": sorted(adb)}, f)
 
 
 def take_resume(path=None):
@@ -190,7 +198,8 @@ def take_resume(path=None):
     if not isinstance(data, dict):
         return None
     return ([h for h in data.get("hosts", []) if isinstance(h, str)],
-            bool(data.get("transmitting", True)))
+            bool(data.get("transmitting", True)),
+            [h for h in data.get("adb", []) if isinstance(h, str)])
 
 
 def discover_hosts():
@@ -388,6 +397,177 @@ class StreamManager(QObject):
                     self.state_changed.emit(host, ON, "")
 
 
+class AdbManager(QObject):
+    """Un tunnel adb (ssh -R, voir vox_adb.py) par host coche, a cote des
+    streams de voix et sans rien partager avec eux. Contrairement a la
+    voix, un tunnel tombe est relance tant que la case reste cochee, avec
+    une attente croissante : adb sert par commandes isolees, il doit
+    retrouver son port apres une veille ou une coupure du lien."""
+
+    # host, etat (OFF/STARTING/ON/ERROR), message, tout va bien
+    state_changed = pyqtSignal(str, str, str, bool)
+
+    def __init__(self):
+        super().__init__()
+        self.wanted = set()     # hosts dont la case est cochee
+        self.procs = {}         # host -> Popen du tunnel
+        self.log_pos = {}       # host -> octets du log deja lus
+        self.checking = set()   # hosts dont le preflight est en vol
+        self.attempts = {}      # host -> relances depuis le dernier succes
+        self.retry_at = {}      # host -> instant de la prochaine relance
+        self.results = queue.Queue()   # (host, statut, message) du preflight
+        os.makedirs(LOG_DIR, exist_ok=True)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._poll)
+        self.timer.start(1000)
+
+    def log_path(self, host):
+        return os.path.join(LOG_DIR, host + ".adb.log")
+
+    def start(self, host):
+        self.wanted.add(host)
+        self.attempts[host] = 0
+        self._connect(host)
+
+    def stop(self, host):
+        self.wanted.discard(host)
+        self.retry_at.pop(host, None)
+        proc = self.procs.get(host)
+        if proc:
+            self._terminate(proc)
+        else:
+            self.state_changed.emit(host, OFF, "", False)
+
+    def stop_all(self):
+        for host in list(self.wanted):
+            self.stop(host)
+
+    @staticmethod
+    def _terminate(proc):
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+
+    def _connect(self, host):
+        if host in self.checking or host in self.procs:
+            return
+        self.checking.add(host)
+        self.state_changed.emit(host, STARTING, "vérification...", False)
+        threading.Thread(
+            target=lambda: self.results.put((host,) + vox_adb.preflight(host)),
+            daemon=True).start()
+
+    def _open(self, host):
+        try:
+            with open(self.log_path(host), "wb", buffering=0) as log:
+                # groupe a part, comme les streams : reap_orphans tue par
+                # groupe, et un Ctrl-C du terminal ne touche pas le tunnel
+                flags = ({"creationflags": NO_WINDOW} if IS_WIN
+                         else {"start_new_session": True})
+                self.procs[host] = subprocess.Popen(
+                    vox_adb.tunnel_cmd(host), stdout=log,
+                    stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **flags)
+        except OSError as e:
+            self._retry(host, str(e))
+            return
+        self.log_pos[host] = 0
+        self.state_changed.emit(host, STARTING, "ouverture du tunnel...", False)
+
+    def _retry(self, host, message):
+        n = self.attempts.get(host, 0)
+        self.attempts[host] = n + 1
+        delay = vox_adb.backoff(n)
+        self.retry_at[host] = time.monotonic() + delay
+        self.state_changed.emit(
+            host, STARTING,
+            "%s - nouvel essai dans %d s" % (message or "tunnel tombé", delay),
+            False)
+
+    def _last_log_line(self, host):
+        try:
+            with open(self.log_path(host), errors="replace") as f:
+                lines = [l.strip() for l in f
+                         if l.strip() and vox_adb.parse_beat(l) is None]
+            return lines[-1] if lines else ""
+        except OSError:
+            return ""
+
+    def _read(self, host):
+        """Battements arrives depuis la derniere lecture du log."""
+        try:
+            with open(self.log_path(host), "rb") as f:
+                f.seek(self.log_pos[host])
+                data = f.read()
+        except OSError:
+            return []
+        # une ligne incomplete attend la lecture suivante
+        end = data.rfind(b"\n") + 1
+        self.log_pos[host] += end
+        beats = (vox_adb.parse_beat(l)
+                 for l in data[:end].decode(errors="replace").splitlines())
+        return [b for b in beats if b]
+
+    def _poll(self):
+        while True:
+            try:
+                host, status, message = self.results.get_nowait()
+            except queue.Empty:
+                break
+            self.checking.discard(host)
+            if host not in self.wanted:
+                self.state_changed.emit(host, OFF, "", False)
+            elif status == vox_adb.OK:
+                self._open(host)
+            elif status == vox_adb.FATAL:
+                self.wanted.discard(host)
+                self.state_changed.emit(host, ERROR, message, False)
+            else:
+                self._retry(host, message)
+
+        for host, proc in list(self.procs.items()):
+            if proc.poll() is not None:
+                del self.procs[host]
+                self.log_pos.pop(host, None)
+                if host in self.wanted:
+                    self._retry(host, self._last_log_line(host))
+                else:
+                    self.state_changed.emit(host, OFF, "", False)
+                continue
+            if host not in self.wanted:
+                continue
+            for beat in self._read(host):
+                if beat[0] == "refused":
+                    # port pris entre le preflight et le tunnel : on coupe,
+                    # la relance refera le preflight qui le libere
+                    self._terminate(proc)
+                    break
+                if beat[0] == "devices":
+                    self.attempts[host] = 0
+                elif beat[0] == "mute":
+                    self._wake_local()
+                text, good = vox_adb.describe(beat)
+                self.state_changed.emit(host, ON, text, good)
+
+        now = time.monotonic()
+        for host, at in list(self.retry_at.items()):
+            if now >= at:
+                del self.retry_at[host]
+                if host in self.wanted:
+                    self._connect(host)
+
+    @staticmethod
+    def _wake_local():
+        """Le serveur adb d'ici ne repond plus au bout du tunnel : relance."""
+        try:
+            subprocess.Popen(["adb", "start-server"], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,
+                             creationflags=NO_WINDOW)
+        except OSError:
+            pass
+
+
 class ListenerChecker(QObject):
     """Verifie periodiquement en SSH si une ecoute est ouverte sur le
     loopback de chaque host (un process qui enregistre Loopback,0,0).
@@ -532,7 +712,7 @@ class StatusDot(QLabel):
 
 
 class HostRow(QWidget):
-    def __init__(self, host, toggle_cb, server_cb):
+    def __init__(self, host, toggle_cb, server_cb, adb_cb):
         super().__init__()
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 2, 8, 2)
@@ -546,6 +726,16 @@ class HostRow(QWidget):
         self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self.name)
         layout.addWidget(self.switch)
+        # tunnel adb vers ce host, independant de l'interrupteur de voix
+        self.adb = QCheckBox("adb")
+        self.adb.setCursor(Qt.PointingHandCursor)
+        self.adb.toggled.connect(lambda on: adb_cb(host, on))
+        if vox_adb.have_local():
+            self.set_adb(False, "", GRAY)
+        else:
+            self.adb.setEnabled(False)
+            self.adb.setToolTip("adb absent de cette machine (paquet adb)")
+        layout.addWidget(self.adb)
         layout.addWidget(self.status, 1)
         # visible seulement sur une erreur
         self.copy = QToolButton()
@@ -569,6 +759,16 @@ class HostRow(QWidget):
         self.switch.setChecked(checked)
         self.switch.blockSignals(False)
 
+    def set_adb(self, checked, text, color):
+        self.adb.blockSignals(True)
+        self.adb.setChecked(checked)
+        self.adb.blockSignals(False)
+        self.adb.setStyleSheet("color: %s;" % color)
+        self.adb.setToolTip(
+            "adb : " + text if text else
+            "Tunnel adb : le téléphone branché ici devient pilotable par\n"
+            "le adb du serveur. Indépendant de la voix, relancé tout seul.")
+
     def set_status(self, text, color):
         self.status.setText(text)
         self.status.setStyleSheet("color: %s;" % color)
@@ -577,7 +777,7 @@ class HostRow(QWidget):
 
 class MainWindow(QWidget):
     def __init__(self, hosts, toggle_cb, master_cb, buffer_cb, auto_cb,
-                 update_cb, server_cb):
+                 update_cb, server_cb, adb_cb):
         super().__init__()
         self.buffer_cb = buffer_cb
         self.auto_cb = auto_cb
@@ -607,7 +807,7 @@ class MainWindow(QWidget):
         if not hosts:
             layout.addWidget(QLabel("Aucun host avec clé trouvé dans ~/.ssh/config"))
         for host in hosts:
-            row = HostRow(host, toggle_cb, server_cb)
+            row = HostRow(host, toggle_cb, server_cb, adb_cb)
             self.rows[host] = row
             layout.addWidget(row)
         if hosts:
@@ -727,7 +927,9 @@ class VoiceTrayApp:
         self.window = MainWindow(self.hosts, self.toggle_host,
                                  self.set_transmitting, self.set_buffer,
                                  self.set_auto, self._on_update_link,
-                                 self.update_server)
+                                 self.update_server, self.toggle_adb)
+        self.adb = AdbManager()
+        self.adb.state_changed.connect(self._on_adb_state)
 
         self.checker = ListenerChecker(self.hosts)
         self.checker.result.connect(self._on_listener_result)
@@ -750,6 +952,14 @@ class VoiceTrayApp:
             act.setCheckable(True)
             act.toggled.connect(lambda on, h=host: self.toggle_host(h, on))
             self.actions[host] = act
+        self.adb_actions = {}
+        if vox_adb.have_local() and self.hosts:
+            adb_menu = self.menu.addMenu("adb")
+            for host in self.hosts:
+                act = adb_menu.addAction(host)
+                act.setCheckable(True)
+                act.toggled.connect(lambda on, h=host: self.toggle_adb(h, on))
+                self.adb_actions[host] = act
         self.menu.addSeparator()
         self.update_action = self.menu.addAction("", self.update_client)
         self.update_action.setVisible(False)
@@ -770,13 +980,17 @@ class VoiceTrayApp:
         state = take_resume()
         if state is None:
             return
-        hosts, transmitting = state
+        hosts, transmitting, adb = state
         if not transmitting:
             self.window.master_switch.setChecked(False)
         for host in hosts:
             row = self.window.rows.get(host)
             if row:
                 row.switch.setChecked(True)
+        for host in adb:
+            row = self.window.rows.get(host)
+            if row and row.adb.isEnabled():
+                row.adb.setChecked(True)
 
     @staticmethod
     def _load_icon(filename):
@@ -804,6 +1018,34 @@ class VoiceTrayApp:
             else:
                 self._set_host_ui(host, False, "inactif", GRAY)
         self._update_tray()
+
+    # --- adb : a cote de la voix, jamais coupe par "Transmission" ------------
+
+    def toggle_adb(self, host, on):
+        if on:
+            self.adb.start(host)
+        else:
+            self.adb.stop(host)
+
+    def _on_adb_state(self, host, state, message, good):
+        checked = state in (STARTING, ON)
+        color = {OFF: GRAY, STARTING: ORANGE, ERROR: RED}.get(
+            state, GREEN if good else ORANGE)
+        row = self.window.rows.get(host)
+        if row:
+            row.set_adb(checked, message, color)
+        act = self.adb_actions.get(host)
+        if act:
+            act.blockSignals(True)
+            act.setChecked(checked)
+            act.blockSignals(False)
+        if state == ERROR:
+            hint = vox_adb.install_hint()
+            if hint in message:
+                self.app.clipboard().setText(hint)
+                message += " (copiée dans le presse-papiers)"
+            self.tray.showMessage("Voxtunnel — adb " + host, message,
+                                  QSystemTrayIcon.Warning, 12000)
 
     def _start_stream(self, host):
         """Lance le stream ; en mode auto, sonde d'abord le lien si la
@@ -1015,10 +1257,11 @@ class VoiceTrayApp:
 
     def _relaunch(self):
         try:
-            save_resume(self.desired, self.transmitting)
+            save_resume(self.desired, self.transmitting, adb=self.adb.wanted)
         except OSError:
             pass  # relance quand meme, interrupteurs a remettre a la main
         self.manager.stop_all()
+        self.adb.stop_all()
 
         def restart():
             if INSTANCE_LOCK is not None:
@@ -1227,6 +1470,7 @@ class VoiceTrayApp:
 
     def _quit(self):
         self.manager.stop_all()
+        self.adb.stop_all()
         # laisse une seconde aux SIGTERM avant de sortir
         QTimer.singleShot(1000, self.app.quit)
 
@@ -1238,7 +1482,7 @@ def reap_orphans():
     la console ou restent visibles dans le gestionnaire de taches."""
     if os.name != "posix":
         return
-    for pattern in ("voxtunnel.sh", "plughw:Loopback,"):
+    for pattern in ("voxtunnel.sh", "plughw:Loopback,", vox_adb.FORWARD):
         try:
             out = subprocess.run(["pgrep", "-f", pattern],
                                  capture_output=True, text=True).stdout

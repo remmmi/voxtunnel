@@ -60,6 +60,22 @@ repository README for the full picture.
   a click pushes the server `.deb` by `scp` and installs it with `sudo -n`,
   falling back to a command to paste when sudo needs a password.
   `python3 vox_update.py` prints the latest release.
+- `vox_adb.py` — adb tunnel, imported by the tray (no Qt inside, covered by
+  `tests/test_adb.py`). Each host row has an `adb` box, independent of the
+  voice switch and of Transmission: it opens `ssh -R 127.0.0.1:5037` so the
+  `adb` of the server reaches the adb server of this machine, which holds
+  the phone over USB. Its SSH connection is its own (`ControlPath=none`,
+  `IPQoS=throughput`): voice and adb never wait on each other. The preflight
+  wants `adb` on both ends with the same protocol version (a client of
+  another version kills the server it reaches) and frees port 5037 on the
+  server when an `adb` or an `sshd` of the same user holds it (a local adb
+  server started during an outage, a ghost tunnel): the last tunnel takes
+  the port. Every 5 s the server lists the phones through the tunnel; the
+  box is green when it sees one, orange otherwise, the tooltip says why.
+  Unlike voice, a fallen tunnel is reopened by the tray (2, 5, 10, 30 s)
+  as long as its box is ticked; the boxes survive the post-update relaunch.
+  Log in `~/.cache/voxtunnel/<host>.adb.log`. `python3 vox_adb.py <host>`
+  runs preflight and tunnel in the foreground, without retry.
 - `install.sh` — user-level install of the desktop launcher (no root).
 - `voxtunnel.desktop.in` — launcher template; `@DIR@` is replaced by
   the absolute path of this folder at install time.
@@ -81,6 +97,7 @@ ALSA/PulseAudio/PipeWire stack.
    - optional: `ffmpeg` with `libopus` (Debian's has it) for the Opus mode
    - `openssh-client`
    - optional: `sox` (only for `voxtunnel.sh --tone`)
+   - optional: `adb` (only for the adb tunnel)
 2. `./install.sh` installs the menu launcher for the current user only
    (`~/.local/share/applications`). `./install.sh --autostart` also copies
    it to `~/.config/autostart`. Nothing else is written outside

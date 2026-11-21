@@ -114,6 +114,17 @@ it is off, grey while idle. Logs per host in
 `~/.cache/voxtunnel/<host>.log`. No automatic reconnect by design: a
 dead stream turns its switch off and shows the error.
 
+### adb through the tunnel
+
+Each host row has an `adb` box: tick it and the phone plugged into your
+machine answers `adb devices`, `adb shell`, `adb install` on that server
+(`127.0.0.1:5037`, an SSH reverse forward to your local adb server). It
+needs the `adb` package on both ends, same protocol version. Separate SSH
+connection: voice and adb never slow each other down, and the box is
+independent of the voice switch and of Transmission. A fallen tunnel
+reopens by itself while the box is ticked; green = the server sees a
+phone, orange = tunnel up but no phone (tooltip says why).
+
 ### The engine without the GUI
 
 `voxtunnel.sh` works on its own, configured by environment variables
@@ -228,6 +239,18 @@ rouge avec une entaille en diagonale quand elle est coupee, grise au
 repos. Logs par host dans
 `~/.cache/voxtunnel/<host>.log`. Pas de reconnexion automatique, par
 choix : un stream mort repasse a OFF et affiche l'erreur.
+
+### adb dans le tunnel
+
+Chaque ligne de host a une case `adb` : cochee, le telephone branche sur
+votre machine repond a `adb devices`, `adb shell`, `adb install` sur ce
+serveur (`127.0.0.1:5037`, un renvoi SSH vers votre serveur adb local).
+Il faut le paquet `adb` aux deux bouts, meme version de protocole.
+Connexion SSH a part : la voix et adb ne se ralentissent jamais, et la
+case ne depend ni de l'interrupteur de voix ni de Transmission. Un tunnel
+tombe se rouvre seul tant que la case est cochee ; vert = le serveur voit
+un telephone, orange = tunnel ouvert sans telephone (l'infobulle dit
+pourquoi).
 
 ### Le moteur sans interface
 

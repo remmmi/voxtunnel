@@ -387,6 +387,13 @@ a { color: var(--blue); }
         <p>A monitor glyph per host shows if the far end is ready. A dead stream flips its own switch off and says why. Latency is a slider, not a mystery.</p>
       </div>
     </div>
+    <div class="row">
+      <span class="toggle" aria-hidden="true"></span>
+      <div>
+        <h3>adb rides along</h3>
+        <p>Tick the <b>adb</b> box of a host and the phone plugged into your machine answers <b>adb devices</b>, <b>adb shell</b>, <b>adb install</b> on that server. Its own SSH connection, so voice and adb never slow each other down, and that tunnel does reopen by itself.</p>
+      </div>
+    </div>
   </div>
 </section>
 
